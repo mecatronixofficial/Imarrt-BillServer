@@ -1,0 +1,579 @@
+// Prisma schema for the billing application
+// Database: MySQL (chosen for ACID compliance - critical for financial records)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  OWNER
+  ACCOUNTANT
+  STAFF
+}
+
+model User {
+  id                  String    @id @default(uuid())
+  name                String
+  email               String    @unique
+  passwordHash        String
+  role                Role      @default(STAFF)
+  isActive            Boolean   @default(true)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  mfaEnabled          Boolean   @default(false)
+  mfaSecret           String?   @db.Text
+  mfaRecoveryCodes    String?   @db.Text
+  passwordChangedAt   DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  invoicesCreated         Invoice[]          @relation("InvoiceCreatedBy")
+  auditLogs               AuditLog[]
+  sessions                AuthSession[]
+  businessMemberships     BusinessMember[]
+  businessesCreated       Business[]         @relation("BusinessCreatedBy")
+  productionOrdersCreated ProductionOrder[]  @relation("ProductionCreatedBy")
+  documentsCreated        BusinessDocument[] @relation("DocumentCreatedBy")
+
+  @@map("users")
+}
+
+model Business {
+  id            String   @id @default(uuid())
+  name          String
+  legalName     String?
+  gstRegistered Boolean  @default(false)
+  gstin         String?
+  gstinHash     String?  @unique @db.VarChar(64)
+  address       String?  @db.Text
+  stateCode     String?  @db.VarChar(2)
+  phone         String?
+  email         String?
+  isActive      Boolean  @default(true)
+  createdById   String
+  createdBy     User     @relation("BusinessCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  members          BusinessMember[]
+  branches         Branch[]
+  parties          Party[]
+  items            Item[]
+  invoices         Invoice[]
+  auditLogs        AuditLog[]
+  suppliers        Supplier[]
+  productionOrders ProductionOrder[]
+  documents        BusinessDocument[]
+
+  @@index([createdById])
+  @@index([name])
+  @@map("businesses")
+}
+
+model Branch {
+  id         String   @id @default(uuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name       String
+  code       String
+  address    String?  @db.Text
+  stateCode  String?  @db.VarChar(2)
+  phone      String?
+  email      String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  invoices         Invoice[]
+  productionOrders ProductionOrder[]
+  documents        BusinessDocument[]
+  auditLogs        AuditLog[]
+
+  @@unique([businessId, code])
+  @@index([businessId, isActive])
+  @@map("branches")
+}
+
+model BusinessMember {
+  businessId String
+  userId     String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@id([businessId, userId])
+  @@index([userId])
+  @@map("business_members")
+}
+
+model AuthSession {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique @db.VarChar(64)
+  userAgent        String?   @db.VarChar(500)
+  ipAddress        String?   @db.VarChar(45)
+  mfaVerified      Boolean   @default(false)
+  expiresAt        DateTime
+  lastUsedAt       DateTime  @default(now())
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+model Party {
+  id                     String               @id @default(uuid())
+  businessId             String?
+  business               Business?            @relation(fields: [businessId], references: [id])
+  name                   String
+  email                  String?
+  phone                  String?
+  whatsappNumber         String?
+  whatsappOptIn          Boolean              @default(false)
+  invoiceDeliveryMode    PartyDeliveryMode    @default(MANUAL)
+  invoiceDeliveryChannel PartyDeliveryChannel @default(BOTH)
+  gstType                PartyGstType         @default(UNREGISTERED)
+  gstin                  String? // encrypted at application layer before save
+  billingAddr            String?              @db.Text
+  shippingAddr           String?              @db.Text
+  creditLimit            Decimal              @default(0) @db.Decimal(12, 2)
+  openingBalance         Decimal              @default(0) @db.Decimal(12, 2)
+  openingBalanceType     PartyBalanceType     @default(RECEIVABLE)
+  notes                  String?              @db.Text
+  isActive               Boolean              @default(true)
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  deletedAt              DateTime? // soft delete
+
+  invoices         Invoice[]
+  productionOrders ProductionOrder[]
+  documents        BusinessDocument[]
+
+  @@index([businessId, name])
+  @@map("customers")
+}
+
+enum PartyGstType {
+  REGISTERED_REGULAR
+  REGISTERED_COMPOSITION
+  UNREGISTERED
+  CONSUMER
+  OVERSEAS
+  SEZ
+}
+
+enum PartyBalanceType {
+  RECEIVABLE
+  PAYABLE
+}
+
+model Supplier {
+  id          String    @id @default(uuid())
+  businessId  String?
+  business    Business? @relation(fields: [businessId], references: [id])
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+  gstin       String?
+  address     String?   @db.Text
+  notes       String?   @db.Text
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  productionOrders ProductionOrder[]
+  productionCosts  ProductionCost[]
+  documents        BusinessDocument[]
+
+  @@index([businessId, name])
+  @@map("suppliers")
+}
+
+enum ProductionOrderStatus {
+  CONFIRMED
+  IN_PRODUCTION
+  READY
+  DISPATCHED
+  COMPLETED
+  CANCELLED
+}
+
+enum ProductionStageType {
+  CUTTING
+  PRINT_EMBROIDERY
+  STITCHING
+  PACKING
+}
+
+enum ProductionStageStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ProductionCostCategory {
+  FABRIC
+  COLLAR_RIB
+  ACCESSORIES
+  LABELS
+  TAGS
+  POLY_BAGS
+  BUTTONS
+  CARTONS
+  TRANSPORT
+  OTHER
+}
+
+model ProductionOrder {
+  id            String                @id @default(uuid())
+  businessId    String?
+  business      Business?             @relation(fields: [businessId], references: [id])
+  branchId      String?
+  branch        Branch?               @relation(fields: [branchId], references: [id])
+  orderNumber   String
+  partyId       String                @map("customerId")
+  party         Party                 @relation(fields: [partyId], references: [id])
+  supplierId    String?
+  supplier      Supplier?             @relation(fields: [supplierId], references: [id])
+  createdById   String
+  createdBy     User                  @relation("ProductionCreatedBy", fields: [createdById], references: [id])
+  styleName     String
+  fabricName    String?
+  fabricGsm     String?
+  color         String?
+  sizeBreakdown Json?
+  orderedQty    Int
+  saleRate      Decimal               @default(0) @db.Decimal(12, 2)
+  dueDate       DateTime?
+  status        ProductionOrderStatus @default(CONFIRMED)
+  notes         String?               @db.Text
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  stages ProductionStage[]
+  costs  ProductionCost[]
+
+  @@unique([branchId, orderNumber])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@index([businessId, branchId, createdAt])
+  @@index([partyId])
+  @@index([supplierId])
+  @@map("production_orders")
+}
+
+model ProductionStage {
+  id           String                @id @default(uuid())
+  orderId      String
+  order        ProductionOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type         ProductionStageType
+  sequence     Int
+  status       ProductionStageStatus @default(PENDING)
+  partnerName  String?
+  dcNumber     String?
+  plannedQty   Int                   @default(0)
+  issuedQty    Int                   @default(0)
+  completedQty Int                   @default(0)
+  rejectedQty  Int                   @default(0)
+  rate         Decimal               @default(0) @db.Decimal(12, 2)
+  otherCost    Decimal               @default(0) @db.Decimal(12, 2)
+  startDate    DateTime?
+  dueDate      DateTime?
+  completedAt  DateTime?
+  notes        String?               @db.Text
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  @@unique([orderId, type])
+  @@index([orderId, sequence])
+  @@map("production_stages")
+}
+
+model ProductionCost {
+  id          String                 @id @default(uuid())
+  orderId     String
+  order       ProductionOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  supplierId  String?
+  supplier    Supplier?              @relation(fields: [supplierId], references: [id])
+  category    ProductionCostCategory
+  description String
+  quantity    Decimal                @default(1) @db.Decimal(12, 3)
+  rate        Decimal                @default(0) @db.Decimal(12, 2)
+  amount      Decimal                @default(0) @db.Decimal(12, 2)
+  paidAmount  Decimal                @default(0) @db.Decimal(12, 2)
+  notes       String?                @db.Text
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  @@index([orderId, category])
+  @@index([supplierId])
+  @@map("production_costs")
+}
+
+model Item {
+  id          String    @id @default(uuid())
+  businessId  String?
+  business    Business? @relation(fields: [businessId], references: [id])
+  name        String
+  sku         String?
+  description String?   @db.Text
+  unit        String    @default("pcs")
+  salePrice   Decimal   @db.Decimal(12, 2)
+  taxRate     Decimal   @default(0) @db.Decimal(5, 2) // e.g. 18.00 for 18% GST
+  stockQty    Decimal   @default(0) @db.Decimal(12, 2)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  invoiceItems  InvoiceItem[]
+  documentItems BusinessDocumentItem[]
+
+  @@unique([businessId, sku])
+  @@index([businessId, name])
+  @@map("items")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum PartyDeliveryMode {
+  MANUAL
+  AUTOMATIC
+}
+
+enum PartyDeliveryChannel {
+  EMAIL
+  WHATSAPP
+  BOTH
+}
+
+enum InvoiceDeliveryChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum InvoiceDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum DocumentType {
+  QUOTATION
+  PROFORMA_INVOICE
+  PURCHASE_INVOICE
+  DELIVERY_CHALLAN
+  CREDIT_NOTE
+  DEBIT_NOTE
+}
+
+enum DocumentStatus {
+  DRAFT
+  ISSUED
+  ACCEPTED
+  REJECTED
+  CONVERTED
+  CANCELLED
+}
+
+model Invoice {
+  id            String    @id @default(uuid())
+  businessId    String?
+  business      Business? @relation(fields: [businessId], references: [id])
+  branchId      String?
+  branch        Branch?   @relation(fields: [branchId], references: [id])
+  invoiceNumber String
+  partyId       String    @map("customerId")
+  party         Party     @relation(fields: [partyId], references: [id])
+  createdById   String
+  createdBy     User      @relation("InvoiceCreatedBy", fields: [createdById], references: [id])
+
+  issueDate DateTime      @default(now())
+  dueDate   DateTime?
+  status    InvoiceStatus @default(DRAFT)
+
+  subTotal   Decimal @db.Decimal(12, 2)
+  taxTotal   Decimal @db.Decimal(12, 2)
+  discount   Decimal @default(0) @db.Decimal(12, 2)
+  grandTotal Decimal @db.Decimal(12, 2)
+  amountPaid Decimal @default(0) @db.Decimal(12, 2)
+
+  notes     String?   @db.Text
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft delete - never hard-delete financial records
+
+  items            InvoiceItem[]
+  payments         PaymentRecord[]
+  relatedDocuments BusinessDocument[]
+  deliveries       InvoiceDelivery[]
+
+  @@unique([branchId, invoiceNumber])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@index([businessId, branchId, createdAt])
+  @@index([partyId])
+  @@index([partyId, issueDate])
+  @@map("invoices")
+}
+
+model InvoiceDelivery {
+  id                String                 @id @default(uuid())
+  invoiceId         String
+  invoice           Invoice                @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  channel           InvoiceDeliveryChannel
+  recipient         String
+  status            InvoiceDeliveryStatus  @default(PENDING)
+  providerMessageId String?
+  errorMessage      String?                @db.Text
+  attemptedAt       DateTime               @default(now())
+  sentAt            DateTime?
+  createdAt         DateTime               @default(now())
+
+  @@index([invoiceId, channel, createdAt])
+  @@map("invoice_deliveries")
+}
+
+model BusinessDocument {
+  id                 String             @id @default(uuid())
+  businessId         String
+  business           Business           @relation(fields: [businessId], references: [id])
+  branchId           String?
+  branch             Branch?            @relation(fields: [branchId], references: [id])
+  type               DocumentType
+  documentNumber     String
+  status             DocumentStatus     @default(DRAFT)
+  partyId            String?            @map("customerId")
+  party              Party?             @relation(fields: [partyId], references: [id])
+  supplierId         String?
+  supplier           Supplier?          @relation(fields: [supplierId], references: [id])
+  referenceInvoiceId String?
+  referenceInvoice   Invoice?           @relation(fields: [referenceInvoiceId], references: [id])
+  sourceDocumentId   String?
+  sourceDocument     BusinessDocument?  @relation("DocumentConversions", fields: [sourceDocumentId], references: [id])
+  convertedDocuments BusinessDocument[] @relation("DocumentConversions")
+  convertedInvoiceId String?
+  issueDate          DateTime           @default(now())
+  validUntil         DateTime?
+  dueDate            DateTime?
+  placeOfSupply      String?
+  transportName      String?
+  vehicleNumber      String?
+  eWayBillNumber     String?
+  referenceNumber    String?
+  reason             String?            @db.Text
+  terms              String?            @db.Text
+  notes              String?            @db.Text
+  subTotal           Decimal            @db.Decimal(12, 2)
+  taxTotal           Decimal            @db.Decimal(12, 2)
+  discount           Decimal            @default(0) @db.Decimal(12, 2)
+  grandTotal         Decimal            @db.Decimal(12, 2)
+  stockAdjusted      Boolean            @default(false)
+  createdById        String
+  createdBy          User               @relation("DocumentCreatedBy", fields: [createdById], references: [id])
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  deletedAt          DateTime?
+
+  items BusinessDocumentItem[]
+
+  @@unique([branchId, documentNumber])
+  @@index([businessId, type, status])
+  @@index([businessId, issueDate])
+  @@index([businessId, branchId, issueDate])
+  @@index([partyId])
+  @@index([supplierId])
+  @@index([referenceInvoiceId])
+  @@map("business_documents")
+}
+
+model BusinessDocumentItem {
+  id          String           @id @default(uuid())
+  documentId  String
+  document    BusinessDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  itemId      String?
+  item        Item?            @relation(fields: [itemId], references: [id])
+  description String
+  hsnSac      String?
+  quantity    Decimal          @db.Decimal(12, 3)
+  unit        String           @default("pcs")
+  unitPrice   Decimal          @db.Decimal(12, 2)
+  taxRate     Decimal          @default(0) @db.Decimal(5, 2)
+  lineTotal   Decimal          @db.Decimal(12, 2)
+
+  @@index([documentId])
+  @@index([itemId])
+  @@map("business_document_items")
+}
+
+model InvoiceItem {
+  id        String  @id @default(uuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+  itemId    String?
+  item      Item?   @relation(fields: [itemId], references: [id])
+
+  description String
+  quantity    Decimal @db.Decimal(12, 2)
+  unitPrice   Decimal @db.Decimal(12, 2)
+  taxRate     Decimal @default(0) @db.Decimal(5, 2)
+  lineTotal   Decimal @db.Decimal(12, 2) // qty * unitPrice + tax
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+// Manual/offline payment recording (cash, bank transfer, UPI noted manually) - no gateway integration
+model PaymentRecord {
+  id        String   @id @default(uuid())
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
+  amount    Decimal  @db.Decimal(12, 2)
+  method    String // cash, bank_transfer, upi, cheque, other
+  reference String?
+  paidAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId, paidAt])
+  @@map("payment_records")
+}
+
+// Audit trail - critical for financial software: who changed what, when
+model AuditLog {
+  id         String    @id @default(uuid())
+  businessId String?
+  business   Business? @relation(fields: [businessId], references: [id])
+  branchId   String?
+  branch     Branch?   @relation(fields: [branchId], references: [id])
+  userId     String?
+  user       User?     @relation(fields: [userId], references: [id])
+  action     String // e.g. "INVOICE_CREATED", "INVOICE_UPDATED", "INVOICE_DELETED"
+  entityType String // e.g. "Invoice"
+  entityId   String
+  metadata   String?   @db.Text // JSON string of before/after diff
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([businessId, createdAt])
+  @@index([branchId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}

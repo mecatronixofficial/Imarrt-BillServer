@@ -1,0 +1,13 @@
+-- Extended party GST classification and credit controls.
+ALTER TABLE `customers`
+  ADD COLUMN `gstType` ENUM(
+    'REGISTERED_REGULAR',
+    'REGISTERED_COMPOSITION',
+    'UNREGISTERED',
+    'CONSUMER',
+    'OVERSEAS',
+    'SEZ'
+  ) NOT NULL DEFAULT 'UNREGISTERED',
+  ADD COLUMN `creditLimit` DECIMAL(12, 2) NOT NULL DEFAULT 0,
+  ADD COLUMN `openingBalance` DECIMAL(12, 2) NOT NULL DEFAULT 0,
+  ADD COLUMN `openingBalanceType` ENUM('RECEIVABLE', 'PAYABLE') NOT NULL DEFAULT 'RECEIVABLE';
