@@ -23,13 +23,13 @@ export class SuppliersController {
   }
 
   @Post()
-  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT)
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   create(@Body() dto: CreateSupplierDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string) {
     return this.suppliers.create(dto, user.id, businessId);
   }
 
   @Patch(':id')
-  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT)
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   update(@Param('id') id: string, @Body() dto: UpdateSupplierDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string) {
     return this.suppliers.update(id, dto, user.id, businessId);
   }

@@ -59,7 +59,7 @@ export class DocumentsController {
   }
 
   @Patch(':id/status')
-  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT)
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateDocumentStatusDto,
@@ -71,13 +71,13 @@ export class DocumentsController {
   }
 
   @Post(':id/convert-to-invoice')
-  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT)
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   convertToInvoice(@Param('id') id: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
     return this.documents.convertToInvoice(id, user.id, businessId, branchId);
   }
 
   @Post(':id/convert-to-proforma')
-  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT)
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   convertToProforma(@Param('id') id: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
     return this.documents.convertToProforma(id, user.id, businessId, branchId);
   }

@@ -48,6 +48,12 @@ export class InvoicesController {
     return this.invoicesService.findAll(businessId, branchId, query);
   }
 
+  @Get('next-number')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  nextNumber(@CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.invoicesService.nextInvoiceNumber(businessId, branchId);
+  }
+
   @Get(':id')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   findOne(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId?: string) {
@@ -85,7 +91,7 @@ export class InvoicesController {
   }
 
   @Post(':id/payments')
-  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT)
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   recordPayment(
     @Param('id') id: string,
     @Body() dto: RecordPaymentDto,
@@ -97,7 +103,7 @@ export class InvoicesController {
   }
 
   @Post(':id/cancel')
-  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT)
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   cancel(@Param('id') id: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
     return this.invoicesService.cancel(id, user.id, businessId, branchId);
   }

@@ -147,7 +147,7 @@ export class DocumentsService {
 
       if (shouldAdjustStock) await this.adjustPurchaseStock(tx, dto.items, 'increment');
       return created;
-    }, { timeout: 15_000, maxWait: 10_000 });
+    }, { timeout: 30_000, maxWait: 15_000 });
 
     await this.audit.log({
       businessId,
