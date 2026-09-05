@@ -17,6 +17,16 @@ export class InvoicesService {
     private delivery: InvoiceDeliveryService,
   ) {}
 
+  async nextInvoiceNumber(businessId: string, branchId: string) {
+    const branch = await this.prisma.branch.findFirst({ where: { id: branchId, businessId, isActive: true } });
+    if (!branch) throw new NotFoundException('Branch not found');
+    const year = new Date().getFullYear();
+    const countThisYear = await this.prisma.invoice.count({
+      where: { branchId, invoiceNumber: { startsWith: `${branch.code}-INV-${year}-` } },
+    });
+    return { invoiceNumber: `${branch.code}-${generateInvoiceNumber(year, countThisYear + 1)}` };
+  }
+
   async create(dto: CreateInvoiceDto, userId: string, businessId: string, branchId: string) {
     const [party, business, branch] = await Promise.all([
       this.prisma.party.findFirst({
@@ -69,6 +79,7 @@ export class InvoicesService {
           invoiceNumber,
           partyId: dto.partyId,
           createdById: userId,
+          issueDate: dto.issueDate ? new Date(dto.issueDate) : undefined,
           dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
           status: InvoiceStatus.UNPAID,
           subTotal: totals.subTotal,
@@ -103,7 +114,7 @@ export class InvoicesService {
       );
 
       return created;
-    }, { timeout: 15000, maxWait: 10000 });
+    }, { timeout: 30_000, maxWait: 15_000 });
 
     await this.audit.log({
       businessId,

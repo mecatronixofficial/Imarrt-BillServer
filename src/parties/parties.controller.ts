@@ -50,7 +50,7 @@ export class PartiesController {
   }
 
   @Patch(':id')
-  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT)
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   update(
     @Param('id') id: string,
     @Body() dto: UpdatePartyDto,

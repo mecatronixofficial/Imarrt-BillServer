@@ -22,6 +22,10 @@ export class CreateInvoiceDto {
 
   @IsOptional()
   @IsDateString()
+  issueDate?: string;
+
+  @IsOptional()
+  @IsDateString()
   dueDate?: string;
 
   @IsOptional()
