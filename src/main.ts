@@ -19,6 +19,9 @@ const helmet = helmetModule as unknown as (
   options?: Readonly<HelmetOptions>,
 ) => RequestHandler;
 
+type ExpressHandler = (request: Request, response: Response) => void;
+let serverlessAppPromise: Promise<INestApplication> | undefined;
+
 export async function createApp(): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
@@ -87,6 +90,23 @@ export async function createApp(): Promise<INestApplication> {
   }
 
   return app;
+}
+
+async function getServerlessApp(): Promise<INestApplication> {
+  if (!serverlessAppPromise) {
+    serverlessAppPromise = createApp().then(async (app) => {
+      await app.init();
+      return app;
+    });
+  }
+
+  return serverlessAppPromise;
+}
+
+export default async function handler(request: Request, response: Response) {
+  const app = await getServerlessApp();
+  const expressHandler = app.getHttpAdapter().getInstance() as ExpressHandler;
+  expressHandler(request, response);
 }
 
 async function bootstrap() {
