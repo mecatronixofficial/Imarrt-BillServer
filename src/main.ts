@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import compression from 'compression';
-import helmet from 'helmet';
+import * as helmetModule from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
@@ -29,7 +29,7 @@ async function bootstrap() {
     app.getHttpAdapter().getInstance().set('trust proxy', 1);
   }
 
-  app.use(helmet({ contentSecurityPolicy: isProduction ? undefined : false }));
+  app.use(helmetModule.default({ contentSecurityPolicy: isProduction ? undefined : false }));
   app.use(compression({ threshold: 1024 }));
 
   app.enableCors({
