@@ -1,10 +1,10 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { AuditService } from '../common/utils/audit.service';
-import { blindIndexField, decryptField, encryptField } from '../common/utils/encryption.util';
-import { CreateBusinessDto } from './dto/create-business.dto';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { AuditService } from '../common/utils/audit.service.js';
+import { blindIndexField, decryptField, encryptField } from '../common/utils/encryption.util.js';
+import { CreateBusinessDto } from './dto/create-business.dto.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 
 type Actor = { id: string; role: Role };
 

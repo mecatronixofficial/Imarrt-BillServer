@@ -1,9 +1,9 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { hashPassword } from '../auth/password.util';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { CreateUserDto } from './dto/create-user.dto.js';
+import { hashPassword } from '../auth/password.util.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 
 @Injectable()
 export class UsersService {

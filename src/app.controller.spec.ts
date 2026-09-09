@@ -1,4 +1,4 @@
-import { AppController } from './app.controller';
+import { AppController } from './app.controller.js';
 
 describe('AppController', () => {
   it('returns a healthy liveness response', () => {

@@ -1,10 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { AuditService } from '../common/utils/audit.service';
-import { decryptField, encryptField } from '../common/utils/encryption.util';
-import { CreateSupplierDto } from './dto/create-supplier.dto';
-import { UpdateSupplierDto } from './dto/update-supplier.dto';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { AuditService } from '../common/utils/audit.service.js';
+import { decryptField, encryptField } from '../common/utils/encryption.util.js';
+import { CreateSupplierDto } from './dto/create-supplier.dto.js';
+import { UpdateSupplierDto } from './dto/update-supplier.dto.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 
 @Injectable()
 export class SuppliersService {

@@ -1,14 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InvoiceDeliveryChannel, InvoiceStatus, PartyDeliveryChannel, PartyDeliveryMode } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateInvoiceDto } from './dto/create-invoice.dto';
-import { RecordPaymentDto } from './dto/record-payment.dto';
-import { computeInvoiceTotals, generateInvoiceNumber } from './invoice-calc.util';
-import { AuditService } from '../common/utils/audit.service';
-import { decryptField } from '../common/utils/encryption.util';
-import { InvoiceDeliveryService } from './invoice-delivery.service';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
+import { RecordPaymentDto } from './dto/record-payment.dto.js';
+import { computeInvoiceTotals, generateInvoiceNumber } from './invoice-calc.util.js';
+import { AuditService } from '../common/utils/audit.service.js';
+import { decryptField } from '../common/utils/encryption.util.js';
+import { InvoiceDeliveryService } from './invoice-delivery.service.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
+import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util.js';
 
 @Injectable()
 export class InvoicesService {

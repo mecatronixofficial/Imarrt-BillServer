@@ -1,7 +1,7 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MfaGuard } from './mfa.guard';
+import { MfaGuard } from './mfa.guard.js';
 
 describe('MfaGuard', () => {
   const getAllAndOverride = vi.fn();

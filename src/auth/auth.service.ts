@@ -9,14 +9,14 @@ import type { JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID, timingSafeEqual } from 'crypto';
 import { Role } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { AuditService } from '../common/utils/audit.service';
-import { decryptField, encryptField } from '../common/utils/encryption.util';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
-import { ChangePasswordDto } from './dto/change-password.dto';
-import { DisableMfaDto } from './dto/disable-mfa.dto';
-import { durationToMilliseconds } from './auth-cookie.util';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { AuditService } from '../common/utils/audit.service.js';
+import { decryptField, encryptField } from '../common/utils/encryption.util.js';
+import { RegisterDto } from './dto/register.dto.js';
+import { LoginDto } from './dto/login.dto.js';
+import { ChangePasswordDto } from './dto/change-password.dto.js';
+import { DisableMfaDto } from './dto/disable-mfa.dto.js';
+import { durationToMilliseconds } from './auth-cookie.util.js';
 import {
   buildTotpUri,
   generateRecoveryCodes,
@@ -24,8 +24,8 @@ import {
   hashRecoveryCode,
   hashToken,
   verifyTotp,
-} from './totp.util';
-import { hashPassword, passwordHashNeedsUpgrade, verifyPassword } from './password.util';
+} from './totp.util.js';
+import { hashPassword, passwordHashNeedsUpgrade, verifyPassword } from './password.util.js';
 
 const MAX_FAILED_LOGINS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000;

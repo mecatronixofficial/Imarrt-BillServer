@@ -2,10 +2,10 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ConfigService } from '@nestjs/config';
 import { InvoiceDeliveryChannel, InvoiceDeliveryStatus } from '@prisma/client';
 import { Resend } from 'resend';
-import { AuditService } from '../common/utils/audit.service';
-import { decryptField } from '../common/utils/encryption.util';
-import { PdfService } from '../pdf/pdf.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../common/utils/audit.service.js';
+import { decryptField } from '../common/utils/encryption.util.js';
+import { PdfService } from '../pdf/pdf.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 
 @Injectable()
 export class InvoiceDeliveryService {

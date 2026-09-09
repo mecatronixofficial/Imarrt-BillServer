@@ -1,10 +1,10 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateItemDto } from './dto/create-item.dto';
-import { UpdateItemDto } from './dto/update-item.dto';
-import { AuditService } from '../common/utils/audit.service';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { CreateItemDto } from './dto/create-item.dto.js';
+import { UpdateItemDto } from './dto/update-item.dto.js';
+import { AuditService } from '../common/utils/audit.service.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
+import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util.js';
 
 @Injectable()
 export class ItemsService {

@@ -1,14 +1,14 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { BusinessScoped } from '../auth/decorators/business-scoped.decorator';
-import { CurrentBusiness } from '../auth/decorators/current-business.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { RequireMfa } from '../auth/decorators/require-mfa.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { BranchesService } from './branches.service';
-import { CreateBranchDto } from './dto/create-branch.dto';
-import { UpdateBranchDto } from './dto/update-branch.dto';
+import { BusinessScoped } from '../auth/decorators/business-scoped.decorator.js';
+import { CurrentBusiness } from '../auth/decorators/current-business.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { RequireMfa } from '../auth/decorators/require-mfa.decorator.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
+import { BranchesService } from './branches.service.js';
+import { CreateBranchDto } from './dto/create-branch.dto.js';
+import { UpdateBranchDto } from './dto/update-branch.dto.js';
 
 @Controller('branches')
 @BusinessScoped()

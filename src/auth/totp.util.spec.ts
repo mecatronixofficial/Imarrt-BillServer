@@ -5,7 +5,7 @@ import {
   hashRecoveryCode,
   hashToken,
   verifyTotp,
-} from './totp.util';
+} from './totp.util.js';
 
 describe('TOTP and token security utilities', () => {
   it('generates a valid authenticator code for a fresh secret', () => {

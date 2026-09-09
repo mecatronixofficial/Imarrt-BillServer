@@ -1,9 +1,9 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { AuditService } from '../common/utils/audit.service';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { CreateBranchDto } from './dto/create-branch.dto';
-import { UpdateBranchDto } from './dto/update-branch.dto';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { AuditService } from '../common/utils/audit.service.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
+import { CreateBranchDto } from './dto/create-branch.dto.js';
+import { UpdateBranchDto } from './dto/update-branch.dto.js';
 
 @Injectable()
 export class BranchesService {

@@ -2,6 +2,7 @@
   "name": "billing-backend",
   "version": "1.0.0",
   "description": "Secure billing/invoicing backend (Vyapar-style)",
+  "type": "module",
   "engines": {
     "node": "24.x"
   },

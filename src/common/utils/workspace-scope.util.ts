@@ -1,4 +1,4 @@
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '../../prisma/prisma.service.js';
 
 /** Returns every company created in the same owner workspace as the active company. */
 export async function getWorkspaceBusinessIds(prisma: PrismaService, businessId: string) {

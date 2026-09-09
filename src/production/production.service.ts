@@ -1,14 +1,14 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ProductionOrderStatus, ProductionStageStatus, ProductionStageType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util';
-import { RecordProductionPaymentDto } from './dto/record-production-payment.dto';
-import { AuditService } from '../common/utils/audit.service';
-import { CreateProductionCostDto } from './dto/create-production-cost.dto';
-import { CreateProductionOrderDto } from './dto/create-production-order.dto';
-import { UpdateProductionStageDto } from './dto/update-production-stage.dto';
-import { calculateProductionSummary } from './production-summary.util';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util.js';
+import { RecordProductionPaymentDto } from './dto/record-production-payment.dto.js';
+import { AuditService } from '../common/utils/audit.service.js';
+import { CreateProductionCostDto } from './dto/create-production-cost.dto.js';
+import { CreateProductionOrderDto } from './dto/create-production-order.dto.js';
+import { UpdateProductionStageDto } from './dto/update-production-stage.dto.js';
+import { calculateProductionSummary } from './production-summary.util.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 
 const orderView = {
   branch: { select: { id: true, name: true, code: true } },

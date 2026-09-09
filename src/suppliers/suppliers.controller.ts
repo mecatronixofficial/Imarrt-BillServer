@@ -1,14 +1,14 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { BusinessScoped } from '../auth/decorators/business-scoped.decorator';
-import { CurrentBusiness } from '../auth/decorators/current-business.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { RequireMfa } from '../auth/decorators/require-mfa.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { CreateSupplierDto } from './dto/create-supplier.dto';
-import { UpdateSupplierDto } from './dto/update-supplier.dto';
-import { SuppliersService } from './suppliers.service';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { BusinessScoped } from '../auth/decorators/business-scoped.decorator.js';
+import { CurrentBusiness } from '../auth/decorators/current-business.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { RequireMfa } from '../auth/decorators/require-mfa.decorator.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { CreateSupplierDto } from './dto/create-supplier.dto.js';
+import { UpdateSupplierDto } from './dto/update-supplier.dto.js';
+import { SuppliersService } from './suppliers.service.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 
 @Controller('suppliers')
 @RequireMfa()

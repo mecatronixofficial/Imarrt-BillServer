@@ -1,13 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DocumentStatus, DocumentType, Prisma } from '@prisma/client';
-import { AuditService } from '../common/utils/audit.service';
-import { decryptField } from '../common/utils/encryption.util';
-import { computeInvoiceTotals } from '../invoices/invoice-calc.util';
-import { InvoicesService } from '../invoices/invoices.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateDocumentDto } from './dto/create-document.dto';
-import { ListDocumentsQueryDto } from './dto/list-documents-query.dto';
-import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util';
+import { AuditService } from '../common/utils/audit.service.js';
+import { decryptField } from '../common/utils/encryption.util.js';
+import { computeInvoiceTotals } from '../invoices/invoice-calc.util.js';
+import { InvoicesService } from '../invoices/invoices.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { CreateDocumentDto } from './dto/create-document.dto.js';
+import { ListDocumentsQueryDto } from './dto/list-documents-query.dto.js';
+import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util.js';
 
 const NUMBER_PREFIX: Record<DocumentType, string> = {
   QUOTATION: 'QUO',

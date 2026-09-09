@@ -9,21 +9,21 @@ import {
   Query,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { InvoicesService } from './invoices.service';
-import { CreateInvoiceDto } from './dto/create-invoice.dto';
-import { RecordPaymentDto } from './dto/record-payment.dto';
-import { PdfService } from '../pdf/pdf.service';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { InvoicesService } from './invoices.service.js';
+import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
+import { RecordPaymentDto } from './dto/record-payment.dto.js';
+import { PdfService } from '../pdf/pdf.service.js';
 import { Role } from '@prisma/client';
-import { RequireMfa } from '../auth/decorators/require-mfa.decorator';
-import { BusinessScoped } from '../auth/decorators/business-scoped.decorator';
-import { CurrentBusiness } from '../auth/decorators/current-business.decorator';
-import { BranchScoped } from '../auth/decorators/branch-scoped.decorator';
-import { CurrentBranch } from '../auth/decorators/current-branch.decorator';
-import { InvoiceDeliveryService } from './invoice-delivery.service';
-import { DeliverInvoiceDto } from './dto/deliver-invoice.dto';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { RequireMfa } from '../auth/decorators/require-mfa.decorator.js';
+import { BusinessScoped } from '../auth/decorators/business-scoped.decorator.js';
+import { CurrentBusiness } from '../auth/decorators/current-business.decorator.js';
+import { BranchScoped } from '../auth/decorators/branch-scoped.decorator.js';
+import { CurrentBranch } from '../auth/decorators/current-branch.decorator.js';
+import { InvoiceDeliveryService } from './invoice-delivery.service.js';
+import { DeliverInvoiceDto } from './dto/deliver-invoice.dto.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 
 @Controller('invoices')
 @RequireMfa()

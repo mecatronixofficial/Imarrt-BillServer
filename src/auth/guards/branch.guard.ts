@@ -1,7 +1,7 @@
 import { BadRequestException, CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { PrismaService } from '../../prisma/prisma.service';
-import { BRANCH_SCOPED_KEY } from '../decorators/branch-scoped.decorator';
+import { PrismaService } from '../../prisma/prisma.service.js';
+import { BRANCH_SCOPED_KEY } from '../decorators/branch-scoped.decorator.js';
 
 @Injectable()
 export class BranchGuard implements CanActivate {

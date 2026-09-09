@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InvoiceStatus, PartyBalanceType, PartyGstType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreatePartyDto } from './dto/create-party.dto';
-import { UpdatePartyDto } from './dto/update-party.dto';
-import { encryptField, decryptField } from '../common/utils/encryption.util';
-import { AuditService } from '../common/utils/audit.service';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { CreatePartyDto } from './dto/create-party.dto.js';
+import { UpdatePartyDto } from './dto/update-party.dto.js';
+import { encryptField, decryptField } from '../common/utils/encryption.util.js';
+import { AuditService } from '../common/utils/audit.service.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
+import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util.js';
 
 @Injectable()
 export class PartiesService {

@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
-import { AuditService } from '../common/utils/audit.service';
-import { InvoicesModule } from '../invoices/invoices.module';
-import { PdfModule } from '../pdf/pdf.module';
-import { DocumentsController } from './documents.controller';
-import { DocumentsService } from './documents.service';
+import { AuditService } from '../common/utils/audit.service.js';
+import { InvoicesModule } from '../invoices/invoices.module.js';
+import { PdfModule } from '../pdf/pdf.module.js';
+import { DocumentsController } from './documents.controller.js';
+import { DocumentsService } from './documents.service.js';
 
 @Module({
   imports: [InvoicesModule, PdfModule],

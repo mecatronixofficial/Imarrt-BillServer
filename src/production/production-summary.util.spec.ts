@@ -1,4 +1,4 @@
-import { calculateProductionSummary } from './production-summary.util';
+import { calculateProductionSummary } from './production-summary.util.js';
 
 describe('calculateProductionSummary', () => {
   it('combines material and process costs and calculates profit', () => {

@@ -3,8 +3,8 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { Request } from 'express';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../../prisma/prisma.service';
-import { ACCESS_TOKEN_COOKIE, readCookie } from '../auth-cookie.util';
+import { PrismaService } from '../../prisma/prisma.service.js';
+import { ACCESS_TOKEN_COOKIE, readCookie } from '../auth-cookie.util.js';
 
 type AccessTokenPayload = {
   sub: string;

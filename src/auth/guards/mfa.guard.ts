@@ -5,7 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { REQUIRE_MFA_KEY } from '../decorators/require-mfa.decorator';
+import { REQUIRE_MFA_KEY } from '../decorators/require-mfa.decorator.js';
 
 @Injectable()
 export class MfaGuard implements CanActivate {

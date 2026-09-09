@@ -1,11 +1,11 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { RequireMfa } from '../auth/decorators/require-mfa.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { BusinessesService } from './businesses.service';
-import { CreateBusinessDto } from './dto/create-business.dto';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { RequireMfa } from '../auth/decorators/require-mfa.decorator.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { BusinessesService } from './businesses.service.js';
+import { CreateBusinessDto } from './dto/create-business.dto.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 
 type CurrentActor = { id: string; role: Role };
 

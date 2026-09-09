@@ -14,22 +14,22 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { Role } from '@prisma/client';
 import { Request, Response } from 'express';
-import { AuthService } from './auth.service';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
-import { MfaCodeDto } from './dto/mfa-code.dto';
-import { DisableMfaDto } from './dto/disable-mfa.dto';
-import { ChangePasswordDto } from './dto/change-password.dto';
-import { CurrentUser } from './decorators/current-user.decorator';
-import { Public } from './decorators/public.decorator';
-import { Roles } from './decorators/roles.decorator';
-import { RequireMfa } from './decorators/require-mfa.decorator';
+import { AuthService } from './auth.service.js';
+import { RegisterDto } from './dto/register.dto.js';
+import { LoginDto } from './dto/login.dto.js';
+import { MfaCodeDto } from './dto/mfa-code.dto.js';
+import { DisableMfaDto } from './dto/disable-mfa.dto.js';
+import { ChangePasswordDto } from './dto/change-password.dto.js';
+import { CurrentUser } from './decorators/current-user.decorator.js';
+import { Public } from './decorators/public.decorator.js';
+import { Roles } from './decorators/roles.decorator.js';
+import { RequireMfa } from './decorators/require-mfa.decorator.js';
 import {
   clearAuthCookies,
   readCookie,
   REFRESH_TOKEN_COOKIE,
   setAuthCookies,
-} from './auth-cookie.util';
+} from './auth-cookie.util.js';
 
 type AuthenticatedUser = {
   id: string;

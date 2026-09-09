@@ -14,7 +14,7 @@ import {
   IsUUID,
 } from 'class-validator';
 import { DocumentStatus, DocumentType } from '@prisma/client';
-import { DocumentItemDto } from './document-item.dto';
+import { DocumentItemDto } from './document-item.dto.js';
 
 export class CreateDocumentDto {
   @IsEnum(DocumentType)

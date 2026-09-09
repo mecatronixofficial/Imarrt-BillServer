@@ -9,15 +9,15 @@ import {
   Query,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { RequireMfa } from '../auth/decorators/require-mfa.decorator';
-import { BusinessScoped } from '../auth/decorators/business-scoped.decorator';
-import { CurrentBusiness } from '../auth/decorators/current-business.decorator';
-import { PartiesService } from './parties.service';
-import { CreatePartyDto } from './dto/create-party.dto';
-import { UpdatePartyDto } from './dto/update-party.dto';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { RequireMfa } from '../auth/decorators/require-mfa.decorator.js';
+import { BusinessScoped } from '../auth/decorators/business-scoped.decorator.js';
+import { CurrentBusiness } from '../auth/decorators/current-business.decorator.js';
+import { PartiesService } from './parties.service.js';
+import { CreatePartyDto } from './dto/create-party.dto.js';
+import { UpdatePartyDto } from './dto/update-party.dto.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 
 @Controller('parties')
 @RequireMfa()

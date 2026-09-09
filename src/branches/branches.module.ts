@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { AuditService } from '../common/utils/audit.service';
-import { BranchesController } from './branches.controller';
-import { BranchesService } from './branches.service';
+import { AuditService } from '../common/utils/audit.service.js';
+import { BranchesController } from './branches.controller.js';
+import { BranchesService } from './branches.service.js';
 
 @Module({
   controllers: [BranchesController],

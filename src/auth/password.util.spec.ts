@@ -1,5 +1,5 @@
 import * as bcrypt from 'bcryptjs';
-import { hashPassword, passwordHashNeedsUpgrade, verifyPassword } from './password.util';
+import { hashPassword, passwordHashNeedsUpgrade, verifyPassword } from './password.util.js';
 
 describe('password utilities', () => {
   // Independent fixture generated with Node's native crypto.argon2Sync.

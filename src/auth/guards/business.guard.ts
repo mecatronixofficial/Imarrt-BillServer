@@ -1,8 +1,8 @@
 import { BadRequestException, CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Role } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { BUSINESS_SCOPED_KEY } from '../decorators/business-scoped.decorator';
+import { PrismaService } from '../../prisma/prisma.service.js';
+import { BUSINESS_SCOPED_KEY } from '../decorators/business-scoped.decorator.js';
 
 @Injectable()
 export class BusinessGuard implements CanActivate {

@@ -14,7 +14,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { InvoiceDeliveryChannel, PartyDeliveryMode } from '@prisma/client';
-import { InvoiceItemDto } from './invoice-item.dto';
+import { InvoiceItemDto } from './invoice-item.dto.js';
 
 export class CreateInvoiceDto {
   @IsUUID()

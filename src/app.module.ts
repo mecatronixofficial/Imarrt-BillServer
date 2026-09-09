@@ -7,26 +7,26 @@ import { LoggerModule } from 'nestjs-pino';
 import { randomUUID } from 'crypto';
 import { IncomingMessage, ServerResponse } from 'http';
 
-import { PrismaModule } from './prisma/prisma.module';
-import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
-import { PartiesModule } from './parties/parties.module';
-import { ItemsModule } from './items/items.module';
-import { InvoicesModule } from './invoices/invoices.module';
-import { PdfModule } from './pdf/pdf.module';
-import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
-import { RolesGuard } from './auth/guards/roles.guard';
-import { OriginGuard } from './auth/guards/origin.guard';
-import { validateEnvironment } from './config/env.validation';
-import { MfaGuard } from './auth/guards/mfa.guard';
-import { BusinessGuard } from './auth/guards/business.guard';
-import { BranchGuard } from './auth/guards/branch.guard';
-import { BusinessesModule } from './businesses/businesses.module';
-import { BranchesModule } from './branches/branches.module';
-import { SuppliersModule } from './suppliers/suppliers.module';
-import { ProductionModule } from './production/production.module';
-import { DocumentsModule } from './documents/documents.module';
-import { AppController } from './app.controller';
+import { PrismaModule } from './prisma/prisma.module.js';
+import { AuthModule } from './auth/auth.module.js';
+import { UsersModule } from './users/users.module.js';
+import { PartiesModule } from './parties/parties.module.js';
+import { ItemsModule } from './items/items.module.js';
+import { InvoicesModule } from './invoices/invoices.module.js';
+import { PdfModule } from './pdf/pdf.module.js';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard.js';
+import { RolesGuard } from './auth/guards/roles.guard.js';
+import { OriginGuard } from './auth/guards/origin.guard.js';
+import { validateEnvironment } from './config/env.validation.js';
+import { MfaGuard } from './auth/guards/mfa.guard.js';
+import { BusinessGuard } from './auth/guards/business.guard.js';
+import { BranchGuard } from './auth/guards/branch.guard.js';
+import { BusinessesModule } from './businesses/businesses.module.js';
+import { BranchesModule } from './branches/branches.module.js';
+import { SuppliersModule } from './suppliers/suppliers.module.js';
+import { ProductionModule } from './production/production.module.js';
+import { DocumentsModule } from './documents/documents.module.js';
+import { AppController } from './app.controller.js';
 
 @Module({
   imports: [

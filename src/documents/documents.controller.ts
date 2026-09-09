@@ -1,18 +1,18 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import type { Response } from 'express';
-import { BusinessScoped } from '../auth/decorators/business-scoped.decorator';
-import { CurrentBusiness } from '../auth/decorators/current-business.decorator';
-import { BranchScoped } from '../auth/decorators/branch-scoped.decorator';
-import { CurrentBranch } from '../auth/decorators/current-branch.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { RequireMfa } from '../auth/decorators/require-mfa.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { PdfService } from '../pdf/pdf.service';
-import { CreateDocumentDto } from './dto/create-document.dto';
-import { UpdateDocumentStatusDto } from './dto/update-document-status.dto';
-import { DocumentsService } from './documents.service';
-import { ListDocumentsQueryDto } from './dto/list-documents-query.dto';
+import { BusinessScoped } from '../auth/decorators/business-scoped.decorator.js';
+import { CurrentBusiness } from '../auth/decorators/current-business.decorator.js';
+import { BranchScoped } from '../auth/decorators/branch-scoped.decorator.js';
+import { CurrentBranch } from '../auth/decorators/current-branch.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { RequireMfa } from '../auth/decorators/require-mfa.decorator.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { PdfService } from '../pdf/pdf.service.js';
+import { CreateDocumentDto } from './dto/create-document.dto.js';
+import { UpdateDocumentStatusDto } from './dto/update-document-status.dto.js';
+import { DocumentsService } from './documents.service.js';
+import { ListDocumentsQueryDto } from './dto/list-documents-query.dto.js';
 
 @Controller('documents')
 @RequireMfa()

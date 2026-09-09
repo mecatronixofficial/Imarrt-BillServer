@@ -1,4 +1,4 @@
-import { computeInvoiceTotals, generateInvoiceNumber } from './invoice-calc.util';
+import { computeInvoiceTotals, generateInvoiceNumber } from './invoice-calc.util.js';
 
 describe('computeInvoiceTotals', () => {
   it('calculates a single line item with tax correctly', () => {
