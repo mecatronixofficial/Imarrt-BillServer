@@ -4,10 +4,18 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import compression from 'compression';
-import * as helmetModule from 'helmet';
+import type { RequestHandler } from 'express';
+import helmetModule, { type HelmetOptions } from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
+
+// Helmet's conditional CommonJS declarations are interpreted as a module
+// namespace by Vercel's TypeScript build even though its ESM default export is
+// the middleware factory at runtime.
+const helmet = helmetModule as unknown as (
+  options?: Readonly<HelmetOptions>,
+) => RequestHandler;
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -29,7 +37,7 @@ async function bootstrap() {
     app.getHttpAdapter().getInstance().set('trust proxy', 1);
   }
 
-  app.use(helmetModule.default({ contentSecurityPolicy: isProduction ? undefined : false }));
+  app.use(helmet({ contentSecurityPolicy: isProduction ? undefined : false }));
   app.use(compression({ threshold: 1024 }));
 
   app.enableCors({
