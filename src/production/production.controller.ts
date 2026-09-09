@@ -13,6 +13,7 @@ import { UpdateProductionStageDto } from './dto/update-production-stage.dto';
 import { UpdateProductionStatusDto } from './dto/update-production-status.dto';
 import { ProductionService } from './production.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { RecordProductionPaymentDto } from './dto/record-production-payment.dto';
 
 @Controller('production-orders')
 @RequireMfa()
@@ -25,6 +26,11 @@ export class ProductionController {
   @Get()
   findAll(@Query() query: PaginationQueryDto, @CurrentBusiness() businessId: string, @CurrentBranch() branchId?: string) {
     return this.production.findAll(businessId, branchId, query);
+  }
+
+  @Get('payments/register')
+  listPayments(@Query() query: PaginationQueryDto, @CurrentBusiness() businessId: string, @CurrentBranch() branchId?: string) {
+    return this.production.listPayments(businessId, branchId, query);
   }
 
   @Get(':id')
@@ -50,6 +56,11 @@ export class ProductionController {
   @Post(':id/costs')
   addCost(@Param('id') id: string, @Body() dto: CreateProductionCostDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
     return this.production.addCost(id, dto, user.id, businessId, branchId);
+  }
+
+  @Post(':id/costs/:costId/payments')
+  recordPayment(@Param('id') id: string, @Param('costId') costId: string, @Body() dto: RecordProductionPaymentDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.production.recordPayment(id, costId, dto, user.id, businessId, branchId);
   }
 
   @Delete(':id/costs/:costId')

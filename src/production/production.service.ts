@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ProductionOrderStatus, ProductionStageStatus, ProductionStageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util';
+import { RecordProductionPaymentDto } from './dto/record-production-payment.dto';
 import { AuditService } from '../common/utils/audit.service';
 import { CreateProductionCostDto } from './dto/create-production-cost.dto';
 import { CreateProductionOrderDto } from './dto/create-production-order.dto';
@@ -34,8 +36,9 @@ export class ProductionService {
   }
 
   async create(dto: CreateProductionOrderDto, userId: string, businessId: string, branchId: string) {
+    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
     const [party, supplier, existing, branch] = await Promise.all([
-      this.prisma.party.findFirst({ where: { id: dto.partyId, businessId, deletedAt: null } }),
+      this.prisma.party.findFirst({ where: { id: dto.partyId, businessId: { in: workspaceBusinessIds }, deletedAt: null } }),
       dto.supplierId
         ? this.prisma.supplier.findFirst({ where: { id: dto.supplierId, businessId, deletedAt: null } })
         : Promise.resolve(null),
@@ -119,6 +122,16 @@ export class ProductionService {
       skip: offset,
     });
     return orders.map((order) => this.present(order));
+  }
+
+  listPayments(businessId: string, branchId: string | undefined, { limit, offset }: PaginationQueryDto) {
+    return this.prisma.productionPayment.findMany({
+      where: { cost: { order: { businessId, ...(branchId ? { branchId } : {}) } } },
+      include: { cost: { include: { supplier: true, order: { select: { id: true, orderNumber: true } } } } },
+      orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }],
+      take: limit,
+      skip: offset,
+    });
   }
 
   async findOne(id: string, businessId: string, branchId?: string) {
@@ -208,6 +221,25 @@ export class ProductionService {
       metadata: { orderId: id, category: cost.category, amount },
     });
     return this.findOne(id, businessId, branchId);
+  }
+
+  async recordPayment(id: string, costId: string, dto: RecordProductionPaymentDto, userId: string, businessId: string, branchId: string) {
+    await this.findOne(id, businessId, branchId);
+    const cost = await this.prisma.productionCost.findFirst({ where: { id: costId, orderId: id } });
+    if (!cost) throw new NotFoundException('Production cost not found');
+    const remaining = Number(cost.amount) - Number(cost.paidAmount);
+    if (dto.amount > remaining + 0.01) throw new BadRequestException('Payment amount exceeds the outstanding cost');
+
+    const payment = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.productionPayment.create({
+        data: { costId, amount: dto.amount, method: dto.method, reference: dto.reference, paidAt: dto.paidAt ? new Date(dto.paidAt) : undefined, createdById: userId },
+        include: { cost: { include: { supplier: true, order: { select: { id: true, orderNumber: true } } } } },
+      });
+      await tx.productionCost.update({ where: { id: costId }, data: { paidAmount: { increment: dto.amount } } });
+      return created;
+    });
+    await this.audit.log({ businessId, branchId, userId, action: 'PAYMENT_OUT_RECORDED', entityType: 'ProductionPayment', entityId: payment.id, metadata: { orderId: id, costId, amount: dto.amount, method: dto.method } });
+    return payment;
   }
 
   async removeCost(id: string, costId: string, userId: string, businessId: string, branchId: string) {

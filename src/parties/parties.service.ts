@@ -6,6 +6,7 @@ import { UpdatePartyDto } from './dto/update-party.dto';
 import { encryptField, decryptField } from '../common/utils/encryption.util';
 import { AuditService } from '../common/utils/audit.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util';
 
 @Injectable()
 export class PartiesService {
@@ -43,8 +44,9 @@ export class PartiesService {
   }
 
   async findAll(businessId: string, { limit, offset }: PaginationQueryDto) {
+    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
     const parties = await this.prisma.party.findMany({
-      where: { businessId, deletedAt: null },
+      where: { businessId: { in: workspaceBusinessIds }, deletedAt: null },
       orderBy: { name: 'asc' },
       take: limit,
       skip: offset,
@@ -81,14 +83,16 @@ export class PartiesService {
   }
 
   async findOne(id: string, businessId: string) {
-    const party = await this.prisma.party.findFirst({ where: { id, businessId, deletedAt: null } });
+    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
+    const party = await this.prisma.party.findFirst({ where: { id, businessId: { in: workspaceBusinessIds }, deletedAt: null } });
     if (!party) throw new NotFoundException('Party not found');
     return this.redact(party);
   }
 
   async ledger(id: string, businessId: string) {
+    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
     const party = await this.prisma.party.findFirst({
-      where: { id, businessId, deletedAt: null },
+      where: { id, businessId: { in: workspaceBusinessIds }, deletedAt: null },
     });
     if (!party) throw new NotFoundException('Party not found');
 

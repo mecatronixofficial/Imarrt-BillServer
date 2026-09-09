@@ -1,6 +1,6 @@
 import { IsDateString, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
-export class RecordPaymentDto {
+export class RecordProductionPaymentDto {
   @IsNumber()
   @Min(0.01)
   amount: number;

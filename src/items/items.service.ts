@@ -4,6 +4,7 @@ import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AuditService } from '../common/utils/audit.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util';
 
 @Injectable()
 export class ItemsService {
@@ -13,8 +14,9 @@ export class ItemsService {
   ) {}
 
   async create(dto: CreateItemDto, userId: string, businessId: string) {
+    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
     if (dto.sku) {
-      const existing = await this.prisma.item.findFirst({ where: { businessId, sku: dto.sku } });
+      const existing = await this.prisma.item.findFirst({ where: { businessId: { in: workspaceBusinessIds }, sku: dto.sku, deletedAt: null } });
       if (existing) throw new ConflictException('An item with this SKU already exists');
     }
     const business = await this.prisma.business.findUnique({ where: { id: businessId }, select: { gstRegistered: true } });
@@ -23,9 +25,10 @@ export class ItemsService {
     return item;
   }
 
-  findAll(businessId: string, { limit, offset }: PaginationQueryDto) {
+  async findAll(businessId: string, { limit, offset }: PaginationQueryDto) {
+    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
     return this.prisma.item.findMany({
-      where: { businessId, deletedAt: null },
+      where: { businessId: { in: workspaceBusinessIds }, deletedAt: null },
       orderBy: { name: 'asc' },
       take: limit,
       skip: offset,
@@ -33,7 +36,8 @@ export class ItemsService {
   }
 
   async findOne(id: string, businessId: string) {
-    const item = await this.prisma.item.findFirst({ where: { id, businessId, deletedAt: null } });
+    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
+    const item = await this.prisma.item.findFirst({ where: { id, businessId: { in: workspaceBusinessIds }, deletedAt: null } });
     if (!item) throw new NotFoundException('Item not found');
     return item;
   }

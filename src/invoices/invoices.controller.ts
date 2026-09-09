@@ -48,6 +48,12 @@ export class InvoicesController {
     return this.invoicesService.findAll(businessId, branchId, query);
   }
 
+  @Get('payments/register')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  listPayments(@Query() query: PaginationQueryDto, @CurrentBusiness() businessId: string, @CurrentBranch() branchId?: string) {
+    return this.invoicesService.listPayments(businessId, branchId, query);
+  }
+
   @Get('next-number')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   nextNumber(@CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {

@@ -8,6 +8,7 @@ import { AuditService } from '../common/utils/audit.service';
 import { decryptField } from '../common/utils/encryption.util';
 import { InvoiceDeliveryService } from './invoice-delivery.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util';
 
 @Injectable()
 export class InvoicesService {
@@ -28,9 +29,10 @@ export class InvoicesService {
   }
 
   async create(dto: CreateInvoiceDto, userId: string, businessId: string, branchId: string) {
+    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
     const [party, business, branch] = await Promise.all([
       this.prisma.party.findFirst({
-        where: { id: dto.partyId, businessId, deletedAt: null },
+        where: { id: dto.partyId, businessId: { in: workspaceBusinessIds }, deletedAt: null },
       }),
       this.prisma.business.findUnique({ where: { id: businessId } }),
       this.prisma.branch.findFirst({ where: { id: branchId, businessId, isActive: true } }),
@@ -42,10 +44,10 @@ export class InvoicesService {
     const itemIds = dto.items.flatMap((item) => (item.itemId ? [item.itemId] : []));
     if (itemIds.length > 0) {
       const validItems = await this.prisma.item.count({
-        where: { id: { in: itemIds }, businessId, deletedAt: null },
+        where: { id: { in: itemIds }, businessId: { in: workspaceBusinessIds }, deletedAt: null },
       });
       if (validItems !== new Set(itemIds).size) {
-        throw new BadRequestException('One or more invoice items do not belong to this business');
+        throw new BadRequestException('One or more invoice items do not belong to this workspace');
       }
     }
 
@@ -149,6 +151,16 @@ export class InvoicesService {
     });
   }
 
+  listPayments(businessId: string, branchId: string | undefined, { limit, offset }: PaginationQueryDto) {
+    return this.prisma.paymentRecord.findMany({
+      where: { invoice: { businessId, ...(branchId ? { branchId } : {}), deletedAt: null } },
+      include: { invoice: { select: { id: true, invoiceNumber: true, grandTotal: true, amountPaid: true, party: { select: { id: true, name: true } } } } },
+      orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }],
+      take: limit,
+      skip: offset,
+    });
+  }
+
   async findOne(id: string, businessId: string, branchId?: string) {
     const invoice = await this.prisma.invoice.findFirst({
       where: { id, businessId, ...(branchId ? { branchId } : {}), deletedAt: null },
@@ -193,6 +205,7 @@ export class InvoicesService {
           amount: dto.amount,
           method: dto.method,
           reference: dto.reference,
+          paidAt: dto.paidAt ? new Date(dto.paidAt) : undefined,
         },
       });
       return tx.invoice.update({

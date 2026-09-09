@@ -7,6 +7,7 @@ import { InvoicesService } from '../invoices/invoices.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { ListDocumentsQueryDto } from './dto/list-documents-query.dto';
+import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util';
 
 const NUMBER_PREFIX: Record<DocumentType, string> = {
   QUOTATION: 'QUO',
@@ -43,10 +44,11 @@ export class DocumentsService {
       throw new BadRequestException('New documents can only be saved as draft or issued');
     }
 
+    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
     const [business, party, supplier, referenceInvoice, sourceDocument] = await Promise.all([
       this.prisma.business.findUnique({ where: { id: businessId } }),
       dto.partyId
-        ? this.prisma.party.findFirst({ where: { id: dto.partyId, businessId, deletedAt: null } })
+        ? this.prisma.party.findFirst({ where: { id: dto.partyId, businessId: { in: workspaceBusinessIds }, deletedAt: null } })
         : null,
       dto.supplierId
         ? this.prisma.supplier.findFirst({ where: { id: dto.supplierId, businessId, deletedAt: null } })
@@ -71,10 +73,10 @@ export class DocumentsService {
     const itemIds = dto.items.flatMap((item) => (item.itemId ? [item.itemId] : []));
     if (itemIds.length > 0) {
       const validItems = await this.prisma.item.count({
-        where: { id: { in: [...new Set(itemIds)] }, businessId, deletedAt: null },
+        where: { id: { in: [...new Set(itemIds)] }, businessId: { in: workspaceBusinessIds }, deletedAt: null },
       });
       if (validItems !== new Set(itemIds).size) {
-        throw new BadRequestException('One or more items do not belong to this business');
+        throw new BadRequestException('One or more items do not belong to this workspace');
       }
     }
 
