@@ -1,11 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { TerminusModule } from '@nestjs/terminus';
 import { APP_GUARD } from '@nestjs/core';
-import { LoggerModule } from 'nestjs-pino';
-import { randomUUID } from 'crypto';
-import { IncomingMessage, ServerResponse } from 'http';
 
 import { PrismaModule } from './prisma/prisma.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -31,31 +28,6 @@ import { AppController } from './app.controller.js';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, cache: true, validate: validateEnvironment }),
-    LoggerModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        pinoHttp: {
-          level: config.get<string>('LOG_LEVEL', 'info'),
-          genReqId: (request: IncomingMessage, response: ServerResponse) => {
-            const suppliedId = request.headers['x-request-id'];
-            const requestId =
-              typeof suppliedId === 'string' && /^[a-zA-Z0-9._-]{1,100}$/.test(suppliedId)
-                ? suppliedId
-                : randomUUID();
-            response.setHeader('X-Request-Id', requestId);
-            return requestId;
-          },
-          redact: {
-            paths: [
-              'req.headers.authorization',
-              'req.headers.cookie',
-              'res.headers["set-cookie"]',
-            ],
-            censor: '[Redacted]',
-          },
-        },
-      }),
-    }),
     TerminusModule,
     // Global rate limiting: 100 requests / 60s per IP by default.
     // Sensitive routes (login/register) override this with a stricter @Throttle().

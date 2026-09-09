@@ -3,10 +3,10 @@ import { Logger as NestLogger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { randomUUID } from 'node:crypto';
 import compression from 'compression';
-import type { RequestHandler } from 'express';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import helmetModule, { type HelmetOptions } from 'helmet';
-import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 
@@ -24,7 +24,17 @@ async function bootstrap() {
     routeResolutionStrategy: 'specificity',
   });
   const config = app.get(ConfigService);
-  app.useLogger(app.get(Logger));
+
+  app.use((request: Request, response: Response, next: NextFunction) => {
+    const suppliedId = request.headers['x-request-id'];
+    const requestId =
+      typeof suppliedId === 'string' && /^[a-zA-Z0-9._-]{1,100}$/.test(suppliedId)
+        ? suppliedId
+        : randomUUID();
+    (request as Request & { id: string }).id = requestId;
+    response.setHeader('X-Request-Id', requestId);
+    next();
+  });
 
   const isProduction = config.getOrThrow<string>('NODE_ENV') === 'production';
   const corsOrigins = config
@@ -86,7 +96,7 @@ async function bootstrap() {
   server.headersTimeout = 66_000;
   server.requestTimeout = 30_000;
 
-  app.get(Logger).log(`Backend listening on http://${host}:${port}/api/v1`);
+  NestLogger.log(`Backend listening on http://${host}:${port}/api/v1`, 'Bootstrap');
 }
 
 bootstrap().catch((error: unknown) => {
