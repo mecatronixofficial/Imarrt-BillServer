@@ -4,9 +4,11 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import compression from 'compression';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import helmetModule, { type HelmetOptions } from 'helmet';
+import type { INestApplication } from '@nestjs/common';
 import { AppModule } from './app.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 
@@ -17,7 +19,7 @@ const helmet = helmetModule as unknown as (
   options?: Readonly<HelmetOptions>,
 ) => RequestHandler;
 
-async function bootstrap() {
+export async function createApp(): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
   });
@@ -67,7 +69,6 @@ async function bootstrap() {
 
   app.useGlobalFilters(new HttpExceptionFilter());
   app.setGlobalPrefix('api/v1');
-  app.enableShutdownHooks();
 
   if (config.get<string>('SWAGGER_ENABLED') === 'true') {
     const swaggerConfig = new DocumentBuilder()
@@ -85,6 +86,14 @@ async function bootstrap() {
     );
   }
 
+  return app;
+}
+
+async function bootstrap() {
+  const app = await createApp();
+  const config = app.get(ConfigService);
+  app.enableShutdownHooks();
+
   const port = Number(config.getOrThrow<string>('PORT'));
   const host = config.get<string>('HOST', '0.0.0.0');
   await app.listen(port, host);
@@ -97,9 +106,12 @@ async function bootstrap() {
   NestLogger.log(`Backend listening on http://${host}:${port}/api/v1`, 'Bootstrap');
 }
 
-bootstrap().catch((error: unknown) => {
-  const detail = error instanceof Error ? error.stack ?? error.message : String(error);
-  NestLogger.error('Application failed to start', detail);
-  process.stderr.write(`Application failed to start: ${detail}\n`);
-  process.exitCode = 1;
-});
+const entryPath = process.argv[1];
+if (entryPath && import.meta.url === pathToFileURL(entryPath).href) {
+  bootstrap().catch((error: unknown) => {
+    const detail = error instanceof Error ? error.stack ?? error.message : String(error);
+    NestLogger.error('Application failed to start', detail);
+    process.stderr.write(`Application failed to start: ${detail}\n`);
+    process.exitCode = 1;
+  });
+}
