@@ -20,8 +20,6 @@ const helmet = helmetModule as unknown as (
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
-    routeConflictPolicy: { duplicate: 'error', shadow: 'warn' },
-    routeResolutionStrategy: 'specificity',
   });
   const config = app.get(ConfigService);
 
