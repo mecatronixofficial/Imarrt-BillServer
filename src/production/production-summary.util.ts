@@ -5,6 +5,7 @@ export type ProductionSummaryInput = {
     plannedQty: number;
     issuedQty: number;
     completedQty: number;
+    rejectedQty: number;
     rate: number | string | { toString(): string };
     otherCost: number | string | { toString(): string };
     status: string;
@@ -21,13 +22,12 @@ export function calculateProductionSummary(input: ProductionSummaryInput) {
   const costs = input.costs ?? [];
   const revenue = input.orderedQty * numeric(input.saleRate);
   const processCost = stages.reduce((total, stage) => {
-    const chargeableQty = Math.max(stage.issuedQty, stage.completedQty);
+    const chargeableQty = stage.completedQty + stage.rejectedQty;
     return total + chargeableQty * numeric(stage.rate) + numeric(stage.otherCost);
   }, 0);
   const materialCost = costs.reduce((total, cost) => total + numeric(cost.amount), 0);
   const totalMakingCost = processCost + materialCost;
   const packedQty = stages.find((stage) => stage.type === 'PACKING')?.completedQty ?? 0;
-  const completedQty = packedQty || input.orderedQty;
   const profit = revenue - totalMakingCost;
   const progress = stages.length
     ? stages.reduce((total, stage) => {
@@ -42,7 +42,7 @@ export function calculateProductionSummary(input: ProductionSummaryInput) {
     processCost: Number(processCost.toFixed(2)),
     materialCost: Number(materialCost.toFixed(2)),
     totalMakingCost: Number(totalMakingCost.toFixed(2)),
-    costPerPiece: completedQty ? Number((totalMakingCost / completedQty).toFixed(2)) : 0,
+    costPerPiece: input.orderedQty ? Number((totalMakingCost / input.orderedQty).toFixed(2)) : 0,
     profit: Number(profit.toFixed(2)),
     marginPercent: revenue ? Number(((profit / revenue) * 100).toFixed(2)) : 0,
     packedQty,
