@@ -8,6 +8,11 @@ import { CreateProductionCostDto } from './dto/create-production-cost.dto.js';
 import { CreateProductionOrderDto } from './dto/create-production-order.dto.js';
 import { UpdateProductionStageDto } from './dto/update-production-stage.dto.js';
 import { calculateProductionSummary } from './production-summary.util.js';
+import {
+  buildInitialProductionStages,
+  getNextStageTransfer,
+  getPreviousProductionStageType,
+} from './production-pipeline.util.js';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 
 const orderView = {
@@ -70,13 +75,6 @@ export class ProductionService {
       throw new BadRequestException('Size quantities must equal the ordered quantity');
     }
 
-    const stageTypes: Array<{ type: ProductionStageType; sequence: number }> = [
-      { type: ProductionStageType.CUTTING, sequence: 1 },
-      { type: ProductionStageType.PRINT_EMBROIDERY, sequence: 2 },
-      { type: ProductionStageType.STITCHING, sequence: 3 },
-      { type: ProductionStageType.PACKING, sequence: 4 },
-    ];
-
     const order = await this.prisma.productionOrder.create({
       data: {
         businessId,
@@ -93,9 +91,10 @@ export class ProductionService {
         orderedQty: dto.orderedQty,
         saleRate: dto.saleRate,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+        status: ProductionOrderStatus.IN_PRODUCTION,
         notes: dto.notes,
         stages: {
-          create: stageTypes.map((stage) => ({ ...stage, plannedQty: dto.orderedQty })),
+          create: buildInitialProductionStages(dto.orderedQty),
         },
       },
       include: orderView,
@@ -154,8 +153,40 @@ export class ProductionService {
     const completedQty = dto.completedQty ?? stage.completedQty;
     const rejectedQty = dto.rejectedQty ?? stage.rejectedQty;
     const issuedQty = dto.issuedQty ?? stage.issuedQty;
-    if (completedQty + rejectedQty > Math.max(dto.plannedQty ?? stage.plannedQty, issuedQty)) {
-      throw new BadRequestException('Completed and rejected quantities cannot exceed the available quantity');
+    const plannedQty = dto.plannedQty ?? stage.plannedQty;
+    const nextStatus = dto.status ?? stage.status;
+    if (issuedQty > plannedQty) {
+      throw new BadRequestException('Issued quantity cannot exceed the planned quantity');
+    }
+    if (completedQty + rejectedQty > issuedQty) {
+      throw new BadRequestException('Completed and rejected quantities cannot exceed the issued quantity');
+    }
+    if (
+      nextStatus === ProductionStageStatus.COMPLETED &&
+      completedQty + rejectedQty !== issuedQty
+    ) {
+      throw new BadRequestException('Completed and rejected quantities must equal the issued quantity before completing a stage');
+    }
+
+    const previousType = getPreviousProductionStageType(stage.type);
+    const previousStage = previousType
+      ? order.stages.find((entry: any) => entry.type === previousType)
+      : null;
+    const isStartingWork =
+      nextStatus !== ProductionStageStatus.PENDING ||
+      issuedQty > 0 ||
+      completedQty + rejectedQty > 0;
+    if (previousStage && previousStage.status !== ProductionStageStatus.COMPLETED && isStartingWork) {
+      throw new BadRequestException('Complete the previous production stage before starting this stage');
+    }
+
+    const transfer = nextStatus === ProductionStageStatus.COMPLETED
+      ? getNextStageTransfer(order.stages, stage.type, completedQty)
+      : null;
+    if (transfer && transfer.processedQty > completedQty) {
+      throw new BadRequestException(
+        'The next stage already contains more processed pieces. Reduce its completed or rejected quantity first.',
+      );
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -173,10 +204,20 @@ export class ProductionService {
           otherCost: dto.otherCost,
           startDate: dto.startDate ? new Date(dto.startDate) : undefined,
           dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
-          completedAt: dto.status === ProductionStageStatus.COMPLETED ? new Date() : undefined,
+          completedAt:
+            nextStatus === ProductionStageStatus.COMPLETED
+              ? stage.completedAt ?? new Date()
+              : null,
           notes: dto.notes,
         },
       });
+
+      if (transfer) {
+        await tx.productionStage.update({
+          where: { id: transfer.stage.id },
+          data: transfer.data,
+        });
+      }
 
       const stages = await tx.productionStage.findMany({ where: { orderId: id } });
       const allComplete = stages.every((entry) => entry.status === ProductionStageStatus.COMPLETED);
@@ -185,7 +226,7 @@ export class ProductionService {
         where: { id },
         data: { status: allComplete ? ProductionOrderStatus.READY : anyStarted ? ProductionOrderStatus.IN_PRODUCTION : ProductionOrderStatus.CONFIRMED },
       });
-    });
+    }, { maxWait: 10_000, timeout: 30_000 });
 
     await this.audit.log({
       businessId,
