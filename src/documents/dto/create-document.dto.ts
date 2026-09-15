@@ -79,6 +79,11 @@ export class CreateDocumentDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
+  paymentMethod?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(5000)
   reason?: string;
 

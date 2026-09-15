@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InvoiceDeliveryChannel, InvoiceStatus, PartyDeliveryChannel, PartyDeliveryMode } from '@prisma/client';
+import { InvoiceAttachmentKind, InvoiceDeliveryChannel, InvoiceStatus, PartyDeliveryChannel, PartyDeliveryMode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
 import { RecordPaymentDto } from './dto/record-payment.dto.js';
@@ -9,6 +9,27 @@ import { decryptField } from '../common/utils/encryption.util.js';
 import { InvoiceDeliveryService } from './invoice-delivery.service.js';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util.js';
+
+export interface UploadedInvoiceFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+const MAX_ATTACHMENTS_PER_INVOICE = 10;
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const DOCUMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'text/plain',
+]);
 
 @Injectable()
 export class InvoicesService {
@@ -164,7 +185,19 @@ export class InvoicesService {
   async findOne(id: string, businessId: string, branchId?: string) {
     const invoice = await this.prisma.invoice.findFirst({
       where: { id, businessId, ...(branchId ? { branchId } : {}), deletedAt: null },
-      include: { items: true, party: true, payments: true, deliveries: { orderBy: { createdAt: 'desc' } }, createdBy: true, business: true, branch: true },
+      include: {
+        items: true,
+        party: true,
+        payments: true,
+        deliveries: { orderBy: { createdAt: 'desc' } },
+        attachments: {
+          select: { id: true, kind: true, fileName: true, mimeType: true, size: true, createdAt: true },
+          orderBy: { createdAt: 'asc' },
+        },
+        createdBy: true,
+        business: true,
+        branch: true,
+      },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
     return {
@@ -180,6 +213,100 @@ export class InvoicesService {
           }
         : null,
     };
+  }
+
+  async addAttachments(
+    invoiceId: string,
+    files: UploadedInvoiceFile[],
+    userId: string,
+    businessId: string,
+    branchId: string,
+  ) {
+    if (!files?.length) throw new BadRequestException('Select at least one file to upload');
+
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id: invoiceId, businessId, branchId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
+    const existing = await this.prisma.invoiceAttachment.aggregate({
+      where: { invoiceId },
+      _count: { id: true },
+      _sum: { size: true },
+    });
+    if (existing._count.id + files.length > MAX_ATTACHMENTS_PER_INVOICE) {
+      throw new BadRequestException(`An invoice can have up to ${MAX_ATTACHMENTS_PER_INVOICE} attachments`);
+    }
+
+    const totalNewBytes = files.reduce((sum, file) => sum + file.size, 0);
+    if ((existing._sum.size ?? 0) + totalNewBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
+      throw new BadRequestException('Invoice attachments cannot exceed 25 MB in total');
+    }
+
+    const uploads = files.map((file) => {
+      if (!file.buffer || file.size <= 0) throw new BadRequestException('Empty files cannot be uploaded');
+      if (file.size > MAX_ATTACHMENT_BYTES) throw new BadRequestException(`${file.originalname} exceeds the 10 MB file limit`);
+
+      const kind = IMAGE_MIME_TYPES.has(file.mimetype)
+        ? InvoiceAttachmentKind.IMAGE
+        : DOCUMENT_MIME_TYPES.has(file.mimetype)
+          ? InvoiceAttachmentKind.DOCUMENT
+          : null;
+      if (!kind) throw new BadRequestException(`${file.originalname} is not a supported image or document`);
+
+      const fileName = file.originalname
+        .replace(/[\r\n]/g, '')
+        .replace(/[^\p{L}\p{N}._() -]/gu, '_')
+        .slice(0, 191) || 'attachment';
+
+      return { kind, fileName, mimeType: file.mimetype, size: file.size, data: Uint8Array.from(file.buffer) };
+    });
+
+    const created = await this.prisma.$transaction(
+      uploads.map((upload) => this.prisma.invoiceAttachment.create({
+        data: { invoiceId, ...upload },
+        select: { id: true, kind: true, fileName: true, mimeType: true, size: true, createdAt: true },
+      })),
+    );
+
+    await this.audit.log({
+      businessId,
+      branchId,
+      userId,
+      action: 'INVOICE_ATTACHMENTS_ADDED',
+      entityType: 'Invoice',
+      entityId: invoiceId,
+      metadata: { files: created.map(({ id, fileName, kind, size }) => ({ id, fileName, kind, size })) },
+    });
+
+    return created;
+  }
+
+  async listAttachments(invoiceId: string, businessId: string, branchId?: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { id: invoiceId, businessId, ...(branchId ? { branchId } : {}), deletedAt: null },
+      select: { id: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
+    return this.prisma.invoiceAttachment.findMany({
+      where: { invoiceId },
+      select: { id: true, kind: true, fileName: true, mimeType: true, size: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async getAttachment(invoiceId: string, attachmentId: string, businessId: string, branchId?: string) {
+    const attachment = await this.prisma.invoiceAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        invoiceId,
+        invoice: { businessId, ...(branchId ? { branchId } : {}), deletedAt: null },
+      },
+    });
+    if (!attachment) throw new NotFoundException('Attachment not found');
+    return attachment;
   }
 
   async recordPayment(invoiceId: string, dto: RecordPaymentDto, userId: string, businessId: string, branchId: string) {

@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFiles, UseInterceptors } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import type { Response } from 'express';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { BusinessScoped } from '../auth/decorators/business-scoped.decorator.js';
 import { CurrentBusiness } from '../auth/decorators/current-business.decorator.js';
 import { BranchScoped } from '../auth/decorators/branch-scoped.decorator.js';
@@ -13,6 +14,7 @@ import { CreateDocumentDto } from './dto/create-document.dto.js';
 import { UpdateDocumentStatusDto } from './dto/update-document-status.dto.js';
 import { DocumentsService } from './documents.service.js';
 import { ListDocumentsQueryDto } from './dto/list-documents-query.dto.js';
+import type { UploadedDocumentFile } from './documents.service.js';
 
 @Controller('documents')
 @RequireMfa()
@@ -56,6 +58,45 @@ export class DocumentsController {
       'Content-Disposition': `attachment; filename="${document.documentNumber}.pdf"`,
     });
     res.send(pdf);
+  }
+
+  @Post(':id/attachments')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  @UseInterceptors(FilesInterceptor('files', 10, { limits: { fileSize: 10 * 1024 * 1024, files: 10 } }))
+  addAttachments(
+    @Param('id') id: string,
+    @UploadedFiles() files: UploadedDocumentFile[],
+    @CurrentUser() user: { id: string },
+    @CurrentBusiness() businessId: string,
+    @CurrentBranch() branchId: string,
+  ) {
+    return this.documents.addAttachments(id, files, user.id, businessId, branchId);
+  }
+
+  @Get(':id/attachments')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  listAttachments(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId?: string) {
+    return this.documents.listAttachments(id, businessId, branchId);
+  }
+
+  @Get(':id/attachments/:attachmentId')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  async downloadAttachment(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @CurrentBusiness() businessId: string,
+    @CurrentBranch() branchId: string | undefined,
+    @Res() res: Response,
+  ) {
+    const attachment = await this.documents.getAttachment(id, attachmentId, businessId, branchId);
+    res.set({
+      'Content-Type': attachment.mimeType,
+      'Content-Length': String(attachment.size),
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(Buffer.from(attachment.data));
   }
 
   @Patch(':id/status')

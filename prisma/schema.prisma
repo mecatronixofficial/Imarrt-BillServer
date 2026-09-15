@@ -392,6 +392,11 @@ enum InvoiceDeliveryStatus {
   FAILED
 }
 
+enum InvoiceAttachmentKind {
+  IMAGE
+  DOCUMENT
+}
+
 enum DocumentType {
   QUOTATION
   PROFORMA_INVOICE
@@ -441,6 +446,7 @@ model Invoice {
   payments         PaymentRecord[]
   relatedDocuments BusinessDocument[]
   deliveries       InvoiceDelivery[]
+  attachments      InvoiceAttachment[]
 
   @@unique([branchId, invoiceNumber])
   @@index([businessId, status])
@@ -449,6 +455,21 @@ model Invoice {
   @@index([partyId])
   @@index([partyId, issueDate])
   @@map("invoices")
+}
+
+model InvoiceAttachment {
+  id        String                @id @default(uuid())
+  invoiceId String
+  invoice   Invoice               @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  kind      InvoiceAttachmentKind
+  fileName  String                @db.VarChar(191)
+  mimeType  String                @db.VarChar(100)
+  size      Int
+  data      Bytes                 @db.LongBlob
+  createdAt DateTime              @default(now())
+
+  @@index([invoiceId, createdAt])
+  @@map("invoice_attachments")
 }
 
 model InvoiceDelivery {
@@ -495,6 +516,7 @@ model BusinessDocument {
   vehicleNumber      String?
   eWayBillNumber     String?
   referenceNumber    String?
+  paymentMethod      String?
   reason             String?            @db.Text
   terms              String?            @db.Text
   notes              String?            @db.Text
@@ -509,7 +531,8 @@ model BusinessDocument {
   updatedAt          DateTime           @updatedAt
   deletedAt          DateTime?
 
-  items BusinessDocumentItem[]
+  items       BusinessDocumentItem[]
+  attachments BusinessDocumentAttachment[]
 
   @@unique([branchId, documentNumber])
   @@index([businessId, type, status])
@@ -519,6 +542,21 @@ model BusinessDocument {
   @@index([supplierId])
   @@index([referenceInvoiceId])
   @@map("business_documents")
+}
+
+model BusinessDocumentAttachment {
+  id         String                @id @default(uuid())
+  documentId String
+  document   BusinessDocument      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  kind       InvoiceAttachmentKind
+  fileName   String                @db.VarChar(191)
+  mimeType   String                @db.VarChar(100)
+  size       Int
+  data       Bytes                 @db.LongBlob
+  createdAt  DateTime              @default(now())
+
+  @@index([documentId, createdAt])
+  @@map("business_document_attachments")
 }
 
 model BusinessDocumentItem {

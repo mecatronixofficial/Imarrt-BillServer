@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { DocumentStatus, DocumentType, Prisma } from '@prisma/client';
+import { DocumentStatus, DocumentType, InvoiceAttachmentKind, Prisma } from '@prisma/client';
 import { AuditService } from '../common/utils/audit.service.js';
 import { decryptField } from '../common/utils/encryption.util.js';
 import { computeInvoiceTotals } from '../invoices/invoice-calc.util.js';
@@ -24,6 +24,27 @@ const PARTY_DOCUMENTS = new Set<DocumentType>([
   DocumentType.DELIVERY_CHALLAN,
   DocumentType.CREDIT_NOTE,
   DocumentType.DEBIT_NOTE,
+]);
+
+export interface UploadedDocumentFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+const MAX_DOCUMENT_ATTACHMENTS = 10;
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const DOCUMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'text/plain',
 ]);
 
 function isOneOf<T>(value: T, options: readonly T[]) {
@@ -122,6 +143,7 @@ export class DocumentsService {
           vehicleNumber: dto.vehicleNumber,
           eWayBillNumber: dto.eWayBillNumber,
           referenceNumber: dto.referenceNumber,
+          paymentMethod: dto.paymentMethod,
           reason: dto.reason,
           terms: dto.terms,
           notes: dto.notes,
@@ -205,6 +227,10 @@ export class DocumentsService {
         createdBy: { select: { id: true, name: true, email: true } },
         referenceInvoice: { select: { id: true, invoiceNumber: true, grandTotal: true, issueDate: true } },
         sourceDocument: { select: { id: true, documentNumber: true, type: true } },
+        attachments: {
+          select: { id: true, kind: true, fileName: true, mimeType: true, size: true, createdAt: true },
+          orderBy: { createdAt: 'asc' },
+        },
       },
     });
     if (!document) throw new NotFoundException('Document not found');
@@ -218,6 +244,102 @@ export class DocumentsService {
         : null,
       business: { ...document.business, gstin: document.business.gstin ? decryptField(document.business.gstin) : null },
     };
+  }
+
+  async addAttachments(
+    documentId: string,
+    files: UploadedDocumentFile[],
+    userId: string,
+    businessId: string,
+    branchId: string,
+  ) {
+    if (!files?.length) throw new BadRequestException('Select at least one file to upload');
+
+    const document = await this.prisma.businessDocument.findFirst({
+      where: { id: documentId, businessId, branchId, deletedAt: null },
+      select: { id: true, type: true },
+    });
+    if (!document) throw new NotFoundException('Document not found');
+    if (document.type !== DocumentType.PURCHASE_INVOICE) {
+      throw new BadRequestException('Attachments can only be uploaded to purchase bills');
+    }
+
+    const existing = await this.prisma.businessDocumentAttachment.aggregate({
+      where: { documentId },
+      _count: { id: true },
+      _sum: { size: true },
+    });
+    if (existing._count.id + files.length > MAX_DOCUMENT_ATTACHMENTS) {
+      throw new BadRequestException(`A purchase bill can have up to ${MAX_DOCUMENT_ATTACHMENTS} attachments`);
+    }
+
+    const totalNewBytes = files.reduce((sum, file) => sum + file.size, 0);
+    if ((existing._sum.size ?? 0) + totalNewBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
+      throw new BadRequestException('Purchase bill attachments cannot exceed 25 MB in total');
+    }
+
+    const uploads = files.map((file) => {
+      if (!file.buffer || file.size <= 0) throw new BadRequestException('Empty files cannot be uploaded');
+      if (file.size > MAX_ATTACHMENT_BYTES) throw new BadRequestException(`${file.originalname} exceeds the 10 MB file limit`);
+
+      const kind = IMAGE_MIME_TYPES.has(file.mimetype)
+        ? InvoiceAttachmentKind.IMAGE
+        : DOCUMENT_MIME_TYPES.has(file.mimetype)
+          ? InvoiceAttachmentKind.DOCUMENT
+          : null;
+      if (!kind) throw new BadRequestException(`${file.originalname} is not a supported image or document`);
+
+      const fileName = file.originalname
+        .replace(/[\r\n]/g, '')
+        .replace(/[^\p{L}\p{N}._() -]/gu, '_')
+        .slice(0, 191) || 'attachment';
+
+      return { kind, fileName, mimeType: file.mimetype, size: file.size, data: Uint8Array.from(file.buffer) };
+    });
+
+    const created = await this.prisma.$transaction(
+      uploads.map((upload) => this.prisma.businessDocumentAttachment.create({
+        data: { documentId, ...upload },
+        select: { id: true, kind: true, fileName: true, mimeType: true, size: true, createdAt: true },
+      })),
+    );
+
+    await this.audit.log({
+      businessId,
+      branchId,
+      userId,
+      action: 'PURCHASE_BILL_ATTACHMENTS_ADDED',
+      entityType: 'BusinessDocument',
+      entityId: documentId,
+      metadata: { files: created.map(({ id, fileName, kind, size }) => ({ id, fileName, kind, size })) },
+    });
+    return created;
+  }
+
+  async listAttachments(documentId: string, businessId: string, branchId?: string) {
+    const document = await this.prisma.businessDocument.findFirst({
+      where: { id: documentId, businessId, ...(branchId ? { branchId } : {}), deletedAt: null },
+      select: { id: true },
+    });
+    if (!document) throw new NotFoundException('Document not found');
+
+    return this.prisma.businessDocumentAttachment.findMany({
+      where: { documentId },
+      select: { id: true, kind: true, fileName: true, mimeType: true, size: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async getAttachment(documentId: string, attachmentId: string, businessId: string, branchId?: string) {
+    const attachment = await this.prisma.businessDocumentAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        documentId,
+        document: { businessId, ...(branchId ? { branchId } : {}), deletedAt: null },
+      },
+    });
+    if (!attachment) throw new NotFoundException('Attachment not found');
+    return attachment;
   }
 
   async updateStatus(id: string, status: DocumentStatus, userId: string, businessId: string, branchId: string) {
