@@ -37,7 +37,7 @@ export class ItemsService {
 
   async create(dto: CreateItemDto, userId: string, businessId: string) {
     const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
-    if (dto.saleDiscountType === 'PERCENTAGE' && (dto.saleDiscount ?? 0) > 100) {
+    if ((dto.saleDiscountType ?? 'PERCENTAGE') === 'PERCENTAGE' && (dto.saleDiscount ?? 0) > 100) {
       throw new BadRequestException('Sale discount percentage cannot exceed 100%');
     }
     if (dto.sku) {
