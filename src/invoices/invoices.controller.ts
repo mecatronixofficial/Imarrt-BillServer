@@ -7,11 +7,15 @@ import {
   Param,
   Res,
   Query,
+  UploadedFiles,
+  UseInterceptors,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { InvoicesService } from './invoices.service.js';
+import type { UploadedInvoiceFile } from './invoices.service.js';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
 import { RecordPaymentDto } from './dto/record-payment.dto.js';
 import { PdfService } from '../pdf/pdf.service.js';
@@ -58,6 +62,45 @@ export class InvoicesController {
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   nextNumber(@CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
     return this.invoicesService.nextInvoiceNumber(businessId, branchId);
+  }
+
+  @Post(':id/attachments')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  @UseInterceptors(FilesInterceptor('files', 10, { limits: { fileSize: 10 * 1024 * 1024, files: 10 } }))
+  addAttachments(
+    @Param('id') id: string,
+    @UploadedFiles() files: UploadedInvoiceFile[],
+    @CurrentUser() user: { id: string },
+    @CurrentBusiness() businessId: string,
+    @CurrentBranch() branchId: string,
+  ) {
+    return this.invoicesService.addAttachments(id, files, user.id, businessId, branchId);
+  }
+
+  @Get(':id/attachments')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  listAttachments(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId?: string) {
+    return this.invoicesService.listAttachments(id, businessId, branchId);
+  }
+
+  @Get(':id/attachments/:attachmentId')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  async downloadAttachment(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @CurrentBusiness() businessId: string,
+    @CurrentBranch() branchId: string | undefined,
+    @Res() res: Response,
+  ) {
+    const attachment = await this.invoicesService.getAttachment(id, attachmentId, businessId, branchId);
+    res.set({
+      'Content-Type': attachment.mimeType,
+      'Content-Length': String(attachment.size),
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.send(Buffer.from(attachment.data));
   }
 
   @Get(':id')

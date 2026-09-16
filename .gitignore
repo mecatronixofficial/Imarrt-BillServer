@@ -28,6 +28,9 @@ bun-debug.log*
 /tmp/
 /temp/
 
+# Migration rollback snapshots (contain live business data)
+*-rollback-backup-*.json
+
 # TypeScript and tooling caches
 *.tsbuildinfo
 .cache/
