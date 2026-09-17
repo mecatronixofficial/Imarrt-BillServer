@@ -38,4 +38,10 @@ describe('calculateProductionSummary', () => {
       marginPercent: -149.94,
     });
   });
+
+  it('charges weight based processes by output kilograms', () => {
+    expect(calculateProductionSummary({ orderedQty: 100, saleRate: 325, stages: [
+      { type: 'WASHING_COMPACTING', status: 'COMPLETED', plannedQty: 100, issuedQty: 100, completedQty: 100, rejectedQty: 0, outputWeightKg: 24.5, rateUnit: 'KG', rate: 20, otherCost: 10 },
+    ], costs: [{ amount: 16077 }] })).toMatchObject({ processCost: 500, totalMakingCost: 16577, costPerPiece: 165.77, profit: 15923 });
+  });
 });

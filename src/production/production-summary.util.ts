@@ -8,6 +8,9 @@ export type ProductionSummaryInput = {
     rejectedQty: number;
     rate: number | string | { toString(): string };
     otherCost: number | string | { toString(): string };
+    inputWeightKg?: number | string | { toString(): string } | null;
+    outputWeightKg?: number | string | { toString(): string } | null;
+    rateUnit?: string;
     status: string;
     type: string;
   }>;
@@ -23,7 +26,8 @@ export function calculateProductionSummary(input: ProductionSummaryInput) {
   const revenue = input.orderedQty * numeric(input.saleRate);
   const processCost = stages.reduce((total, stage) => {
     const chargeableQty = stage.completedQty + stage.rejectedQty;
-    return total + chargeableQty * numeric(stage.rate) + numeric(stage.otherCost);
+    const chargeable = stage.rateUnit === 'KG' ? numeric(stage.outputWeightKg) : chargeableQty;
+    return total + chargeable * numeric(stage.rate) + numeric(stage.otherCost);
   }, 0);
   const materialCost = costs.reduce((total, cost) => total + numeric(cost.amount), 0);
   const totalMakingCost = processCost + materialCost;

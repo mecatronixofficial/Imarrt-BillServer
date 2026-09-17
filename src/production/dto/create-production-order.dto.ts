@@ -44,6 +44,38 @@ export class CreateProductionOrderDto {
   saleRate: number;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  supplierRate?: number;
+
+  @IsOptional()
+  @IsDateString()
+  orderDate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  invoiceDetails?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  transport?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  destination?: string;
+
+  @IsOptional()
+  @IsObject()
+  sizeColorBreakdown?: Record<string, Record<string, number>>;
+
+  @IsOptional()
+  @IsObject()
+  instructions?: Record<string, unknown>;
+
+  @IsOptional()
   @IsDateString()
   dueDate?: string;
 

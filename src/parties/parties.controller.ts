@@ -37,6 +37,12 @@ export class PartiesController {
     return this.partiesService.findAll(businessId, query);
   }
 
+  @Get('next-code')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  nextCode(@CurrentBusiness() businessId: string) {
+    return this.partiesService.nextPartyCode(businessId);
+  }
+
   @Get(':id')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   findOne(@Param('id') id: string, @CurrentBusiness() businessId: string) {

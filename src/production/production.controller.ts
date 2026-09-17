@@ -1,5 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Role, ProductionStageType } from '@prisma/client';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { BusinessScoped } from '../auth/decorators/business-scoped.decorator.js';
 import { CurrentBusiness } from '../auth/decorators/current-business.decorator.js';
 import { BranchScoped } from '../auth/decorators/branch-scoped.decorator.js';
@@ -33,9 +35,32 @@ export class ProductionController {
     return this.production.listPayments(businessId, branchId, query);
   }
 
+  @Get('capabilities')
+  capabilities() { return { masterVersion: 2, imageDetails: true }; }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId?: string) {
     return this.production.findOne(id, businessId, branchId);
+  }
+
+  @Post(':id/images')
+  @UseInterceptors(FileInterceptor('image', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  addImage(@Param('id') id: string, @UploadedFile() file: { buffer: Buffer; size: number; mimetype: string; originalname: string } | undefined, @Body() body: { stageType?: ProductionStageType; displayName?: string; color?: string; sizeLabel?: string; details?: string }, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    const stageType = body.stageType;
+    if (stageType && !Object.values(ProductionStageType).includes(stageType)) throw new BadRequestException('Invalid production stage');
+    return this.production.addImage(id, file, stageType, body, user.id, businessId, branchId);
+  }
+
+  @Get(':id/images/:imageId')
+  async getImage(@Param('id') id: string, @Param('imageId') imageId: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string, @Res() res: Response) {
+    const image = await this.production.getImage(id, imageId, businessId, branchId);
+    res.set({ 'Content-Type': image.mimeType, 'Content-Length': String(image.size), 'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(image.fileName)}`, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' });
+    res.send(Buffer.from(image.data));
+  }
+
+  @Delete(':id/images/:imageId')
+  removeImage(@Param('id') id: string, @Param('imageId') imageId: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.production.removeImage(id, imageId, user.id, businessId, branchId);
   }
 
   @Post()
@@ -51,6 +76,22 @@ export class ProductionController {
   @Patch(':id/status')
   updateStatus(@Param('id') id: string, @Body() dto: UpdateProductionStatusDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
     return this.production.updateStatus(id, dto.status, user.id, businessId, branchId);
+  }
+
+  @Patch(':id/confirm')
+  confirm(@Param('id') id: string, @Body('confirmedAt') confirmedAt: string | undefined, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.production.confirm(id, confirmedAt, user.id, businessId, branchId);
+  }
+
+  @Patch(':id/master')
+  updateMaster(@Param('id') id: string, @Body() dto: CreateProductionOrderDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.production.updateMaster(id, dto, user.id, businessId, branchId);
+  }
+
+  @Delete(':id')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER)
+  removeOrder(@Param('id') id: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.production.removeOrder(id, user.id, businessId, branchId);
   }
 
   @Post(':id/costs')
