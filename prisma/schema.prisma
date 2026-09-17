@@ -135,7 +135,10 @@ model Party {
   id                     String               @id @default(uuid())
   businessId             String?
   business               Business?            @relation(fields: [businessId], references: [id])
+  code                   String?
   name                   String
+  billingName            String?
+  group                  String?
   email                  String?
   phone                  String?
   whatsappNumber         String?
@@ -159,7 +162,9 @@ model Party {
   productionOrders ProductionOrder[]
   documents        BusinessDocument[]
 
+  @@unique([businessId, code])
   @@index([businessId, name])
+  @@index([businessId, group])
   @@map("customers")
 }
 
@@ -202,6 +207,7 @@ model Supplier {
 }
 
 enum ProductionOrderStatus {
+  DRAFT
   CONFIRMED
   IN_PRODUCTION
   READY
@@ -215,6 +221,10 @@ enum ProductionStageType {
   PRINT_EMBROIDERY
   STITCHING
   PACKING
+  MASTER
+  FABRIC_PURCHASE
+  WASHING_COMPACTING
+  FINAL
 }
 
 enum ProductionStageStatus {
@@ -256,6 +266,14 @@ model ProductionOrder {
   sizeBreakdown Json?
   orderedQty    Int
   saleRate      Decimal               @default(0) @db.Decimal(12, 2)
+  supplierRate  Decimal               @default(0) @db.Decimal(12, 2)
+  orderDate     DateTime               @default(now())
+  confirmedAt   DateTime?
+  invoiceDetails String?              @db.Text
+  transport     String?
+  destination   String?
+  sizeColorBreakdown Json?
+  instructions  Json?
   dueDate       DateTime?
   status        ProductionOrderStatus @default(CONFIRMED)
   notes         String?               @db.Text
@@ -264,6 +282,7 @@ model ProductionOrder {
 
   stages ProductionStage[]
   costs  ProductionCost[]
+  images ProductionImage[]
 
   @@unique([branchId, orderNumber])
   @@index([businessId, status])
@@ -289,6 +308,9 @@ model ProductionStage {
   rejectedQty  Int                   @default(0)
   rate         Decimal               @default(0) @db.Decimal(12, 2)
   otherCost    Decimal               @default(0) @db.Decimal(12, 2)
+  inputWeightKg Decimal?              @db.Decimal(12, 3)
+  outputWeightKg Decimal?             @db.Decimal(12, 3)
+  rateUnit     String                 @default("PIECE")
   startDate    DateTime?
   dueDate      DateTime?
   completedAt  DateTime?
@@ -299,6 +321,25 @@ model ProductionStage {
   @@unique([orderId, type])
   @@index([orderId, sequence])
   @@map("production_stages")
+}
+
+model ProductionImage {
+  id        String          @id @default(uuid())
+  orderId   String
+  order     ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  stageType ProductionStageType?
+  displayName String?
+  color     String?
+  sizeLabel String?
+  details   String? @db.Text
+  fileName  String
+  mimeType  String
+  size      Int
+  data      Bytes           @db.LongBlob
+  createdAt DateTime        @default(now())
+
+  @@index([orderId, stageType])
+  @@map("production_images")
 }
 
 model ProductionCost {

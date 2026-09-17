@@ -1,5 +1,5 @@
 import { ProductionStageStatus } from '@prisma/client';
-import { IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class UpdateProductionStageDto {
   @IsOptional()
@@ -45,6 +45,20 @@ export class UpdateProductionStageDto {
   @IsNumber()
   @Min(0)
   otherCost?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  inputWeightKg?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  outputWeightKg?: number;
+
+  @IsOptional()
+  @IsIn(['PIECE', 'KG'])
+  rateUnit?: 'PIECE' | 'KG';
 
   @IsOptional()
   @IsDateString()

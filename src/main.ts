@@ -127,7 +127,13 @@ async function bootstrap() {
 }
 
 const entryPath = process.argv[1];
-if (entryPath && import.meta.url === pathToFileURL(entryPath).href) {
+const normalizedEntryPath =
+  entryPath && !entryPath.endsWith('.js') ? `${entryPath}.js` : entryPath;
+
+if (
+  normalizedEntryPath &&
+  import.meta.url === pathToFileURL(normalizedEntryPath).href
+) {
   bootstrap().catch((error: unknown) => {
     const detail = error instanceof Error ? error.stack ?? error.message : String(error);
     NestLogger.error('Application failed to start', detail);

@@ -1,10 +1,14 @@
 import { ProductionStageStatus, ProductionStageType } from '@prisma/client';
 
 export const PRODUCTION_PIPELINE: ProductionStageType[] = [
+  ProductionStageType.MASTER,
+  ProductionStageType.FABRIC_PURCHASE,
+  ProductionStageType.WASHING_COMPACTING,
   ProductionStageType.CUTTING,
-  ProductionStageType.STITCHING,
   ProductionStageType.PRINT_EMBROIDERY,
+  ProductionStageType.STITCHING,
   ProductionStageType.PACKING,
+  ProductionStageType.FINAL,
 ];
 
 export function getPreviousProductionStageType(currentType: ProductionStageType) {
@@ -18,6 +22,7 @@ export function buildInitialProductionStages(orderedQty: number) {
     sequence: index + 1,
     plannedQty: index === 0 ? orderedQty : 0,
     issuedQty: index === 0 ? orderedQty : 0,
+    rateUnit: type === ProductionStageType.FABRIC_PURCHASE ? 'KG' : 'PIECE',
     status: index === 0
       ? ProductionStageStatus.IN_PROGRESS
       : ProductionStageStatus.PENDING,
@@ -30,6 +35,7 @@ type TransferStage = {
   status: ProductionStageStatus;
   completedQty: number;
   rejectedQty: number;
+  sequence?: number;
 };
 
 export function getNextStageTransfer(
@@ -37,11 +43,9 @@ export function getNextStageTransfer(
   currentType: ProductionStageType,
   completedQty: number,
 ) {
-  const currentIndex = PRODUCTION_PIPELINE.indexOf(currentType);
-  const nextType = PRODUCTION_PIPELINE[currentIndex + 1];
-  if (!nextType) return null;
-
-  const stage = stages.find((entry) => entry.type === nextType);
+  const ordered = [...stages].sort((left, right) => (left.sequence ?? PRODUCTION_PIPELINE.indexOf(left.type)) - (right.sequence ?? PRODUCTION_PIPELINE.indexOf(right.type)));
+  const currentIndex = ordered.findIndex((entry) => entry.type === currentType);
+  const stage = ordered[currentIndex + 1];
   if (!stage) return null;
 
   return {

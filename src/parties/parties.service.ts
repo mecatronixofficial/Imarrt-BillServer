@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InvoiceStatus, PartyBalanceType, PartyGstType } from '@prisma/client';
+import { InvoiceStatus, PartyBalanceType, PartyGstType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreatePartyDto } from './dto/create-party.dto.js';
 import { UpdatePartyDto } from './dto/update-party.dto.js';
@@ -23,15 +23,28 @@ export class PartiesService {
     };
   }
 
+  async nextPartyCode(businessId: string) {
+    return { code: await this.generatePartyCode(this.prisma, businessId) };
+  }
+
+  private async generatePartyCode(tx: PrismaService | Prisma.TransactionClient, businessId: string) {
+    const count = await tx.party.count({ where: { businessId } });
+    return `P-${String(count + 1).padStart(4, '0')}`;
+  }
+
   async create(dto: CreatePartyDto, userId: string, businessId: string) {
     const gstType = dto.gstType ?? PartyGstType.UNREGISTERED;
-    const party = await this.prisma.party.create({
-      data: {
-        ...dto,
-        businessId,
-        gstType,
-        gstin: usesGstin(gstType) && dto.gstin ? encryptField(dto.gstin.toUpperCase()) : undefined,
-      },
+    const party = await this.prisma.$transaction(async (tx) => {
+      const code = dto.code?.trim() || await this.generatePartyCode(tx, businessId);
+      return tx.party.create({
+        data: {
+          ...dto,
+          code,
+          businessId,
+          gstType,
+          gstin: usesGstin(gstType) && dto.gstin ? encryptField(dto.gstin.toUpperCase()) : undefined,
+        },
+      });
     });
     await this.audit.log({
       businessId,

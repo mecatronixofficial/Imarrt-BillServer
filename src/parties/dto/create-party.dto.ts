@@ -2,9 +2,24 @@ import { IsBoolean, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Matches, Ma
 import { PartyBalanceType, PartyDeliveryChannel, PartyDeliveryMode, PartyGstType } from '@prisma/client';
 
 export class CreatePartyDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  code?: string;
+
   @IsString()
   @MaxLength(150)
   name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  billingName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  group?: string;
 
   @IsOptional()
   @IsEmail()

@@ -11,7 +11,6 @@ import { calculateProductionSummary } from './production-summary.util.js';
 import {
   buildInitialProductionStages,
   getNextStageTransfer,
-  getPreviousProductionStageType,
 } from './production-pipeline.util.js';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 
@@ -24,6 +23,7 @@ const orderView = {
     include: { supplier: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'desc' as const },
   },
+  images: { select: { id: true, stageType: true, displayName: true, color: true, sizeLabel: true, details: true, fileName: true, mimeType: true, size: true, createdAt: true }, orderBy: { createdAt: 'desc' as const } },
 };
 
 @Injectable()
@@ -74,6 +74,20 @@ export class ProductionService {
     if (sizeTotal > 0 && sizeTotal !== dto.orderedQty) {
       throw new BadRequestException('Size quantities must equal the ordered quantity');
     }
+    const colorRows = Object.entries(dto.sizeColorBreakdown ?? {});
+    if (colorRows.length > 40 || colorRows.some(([color, sizes]) => color.length > 80 || !sizes || typeof sizes !== 'object' || Array.isArray(sizes))) {
+      throw new BadRequestException('Enter up to 40 valid color rows');
+    }
+    const colorSizeTotals: Record<string, number> = {};
+    for (const [, sizes] of colorRows) {
+      for (const [size, quantity] of Object.entries(sizes)) {
+        if (size.length > 30 || !Number.isInteger(quantity) || quantity < 0) throw new BadRequestException('Color and size quantities must be non-negative whole numbers');
+        colorSizeTotals[size] = (colorSizeTotals[size] ?? 0) + quantity;
+      }
+    }
+    if (colorRows.length && (Object.values(colorSizeTotals).reduce((sum, value) => sum + value, 0) !== dto.orderedQty || Object.entries(colorSizeTotals).some(([size, value]) => value !== dto.sizeBreakdown?.[size]))) {
+      throw new BadRequestException('Color and size totals must match the order quantity');
+    }
 
     const order = await this.prisma.productionOrder.create({
       data: {
@@ -90,11 +104,18 @@ export class ProductionService {
         sizeBreakdown: dto.sizeBreakdown,
         orderedQty: dto.orderedQty,
         saleRate: dto.saleRate,
+        supplierRate: dto.supplierRate ?? 0,
+        orderDate: dto.orderDate ? new Date(dto.orderDate) : undefined,
+        invoiceDetails: dto.invoiceDetails,
+        transport: dto.transport,
+        destination: dto.destination,
+        sizeColorBreakdown: dto.sizeColorBreakdown,
+        instructions: dto.instructions as any,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
-        status: ProductionOrderStatus.IN_PRODUCTION,
+        status: ProductionOrderStatus.DRAFT,
         notes: dto.notes,
         stages: {
-          create: buildInitialProductionStages(dto.orderedQty),
+          create: buildInitialProductionStages(dto.orderedQty).map((stage) => ({ ...stage, issuedQty: 0, status: ProductionStageStatus.PENDING })),
         },
       },
       include: orderView,
@@ -146,6 +167,7 @@ export class ProductionService {
     const order = await this.findOne(id, businessId, branchId);
     const stage = order.stages.find((entry: any) => entry.id === stageId);
     if (!stage) throw new NotFoundException('Production stage not found');
+    if (order.status === ProductionOrderStatus.DRAFT) throw new BadRequestException('Confirm the order before starting production');
     if ([ProductionOrderStatus.COMPLETED, ProductionOrderStatus.CANCELLED].includes(order.status)) {
       throw new BadRequestException('Completed or cancelled orders cannot be changed');
     }
@@ -161,6 +183,12 @@ export class ProductionService {
     if (completedQty + rejectedQty > issuedQty) {
       throw new BadRequestException('Completed and rejected quantities cannot exceed the issued quantity');
     }
+    if ((dto.rateUnit ?? stage.rateUnit) === 'KG' && (nextStatus === ProductionStageStatus.COMPLETED || Number(dto.rate ?? stage.rate) > 0) && !Number(dto.outputWeightKg ?? stage.outputWeightKg)) {
+      throw new BadRequestException('Enter output weight when charging this process per kilogram');
+    }
+    if (stage.type === ProductionStageType.FABRIC_PURCHASE && Number(dto.rate ?? stage.rate) > 0 && order.costs.some((cost: any) => cost.category === 'FABRIC')) {
+      throw new BadRequestException('Fabric has already been entered as a material cost. Record its price in one place only');
+    }
     if (
       nextStatus === ProductionStageStatus.COMPLETED &&
       completedQty + rejectedQty !== issuedQty
@@ -168,10 +196,7 @@ export class ProductionService {
       throw new BadRequestException('Completed and rejected quantities must equal the issued quantity before completing a stage');
     }
 
-    const previousType = getPreviousProductionStageType(stage.type);
-    const previousStage = previousType
-      ? order.stages.find((entry: any) => entry.type === previousType)
-      : null;
+    const previousStage = order.stages.filter((entry: any) => entry.sequence < stage.sequence).sort((a: any, b: any) => b.sequence - a.sequence)[0] ?? null;
     const isStartingWork =
       nextStatus !== ProductionStageStatus.PENDING ||
       issuedQty > 0 ||
@@ -202,6 +227,9 @@ export class ProductionService {
           rejectedQty: dto.rejectedQty,
           rate: dto.rate,
           otherCost: dto.otherCost,
+          inputWeightKg: dto.inputWeightKg,
+          outputWeightKg: dto.outputWeightKg,
+          rateUnit: dto.rateUnit,
           startDate: dto.startDate ? new Date(dto.startDate) : undefined,
           dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
           completedAt:
@@ -241,7 +269,11 @@ export class ProductionService {
   }
 
   async addCost(id: string, dto: CreateProductionCostDto, userId: string, businessId: string, branchId: string) {
-    await this.findOne(id, businessId, branchId);
+    const order = await this.findOne(id, businessId, branchId);
+    const purchase = order.stages.find((stage: any) => stage.type === ProductionStageType.FABRIC_PURCHASE);
+    if (dto.category === 'FABRIC' && purchase && Number(purchase.rate) > 0) {
+      throw new BadRequestException('Fabric purchase price is already recorded in the process stage');
+    }
     if (dto.supplierId) {
       const supplier = await this.prisma.supplier.findFirst({
         where: { id: dto.supplierId, businessId, deletedAt: null },
@@ -302,14 +334,15 @@ export class ProductionService {
 
   async updateStatus(id: string, status: ProductionOrderStatus, userId: string, businessId: string, branchId: string) {
     const order = await this.findOne(id, businessId, branchId);
+    if (order.status === ProductionOrderStatus.DRAFT) throw new BadRequestException('Confirm the draft order first');
     if (
       status === ProductionOrderStatus.READY ||
       status === ProductionOrderStatus.DISPATCHED ||
       status === ProductionOrderStatus.COMPLETED
     ) {
-      const packing = order.stages.find((stage: any) => stage.type === ProductionStageType.PACKING);
-      if (!packing || packing.status !== ProductionStageStatus.COMPLETED) {
-        throw new BadRequestException('Complete packing before marking this order ready or complete');
+      const final = order.stages.find((stage: any) => stage.type === ProductionStageType.FINAL);
+      if (!final || final.status !== ProductionStageStatus.COMPLETED) {
+        throw new BadRequestException('Complete final inspection before marking this order ready or complete');
       }
     }
     const updated = await this.prisma.productionOrder.update({ where: { id }, data: { status }, include: orderView });
@@ -323,5 +356,102 @@ export class ProductionService {
       metadata: { from: order.status, to: status },
     });
     return this.present(updated);
+  }
+
+  async confirm(id: string, confirmedAt: string | undefined, userId: string, businessId: string, branchId: string) {
+    const order = await this.findOne(id, businessId, branchId);
+    if (order.status !== ProductionOrderStatus.DRAFT) throw new BadRequestException('Only draft orders can be confirmed');
+    const master = order.stages.find((stage: any) => stage.type === ProductionStageType.MASTER);
+    if (!master) throw new BadRequestException('Master stage is missing');
+    const fabricPurchase = order.stages.find((stage: any) => stage.type === ProductionStageType.FABRIC_PURCHASE);
+    if (!fabricPurchase) throw new BadRequestException('Fabric purchase stage is missing');
+    const confirmedDate = confirmedAt ? new Date(confirmedAt) : new Date();
+    if (Number.isNaN(confirmedDate.getTime())) throw new BadRequestException('Invalid confirmation date');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.productionStage.update({ where: { id: master.id }, data: { issuedQty: order.orderedQty, completedQty: order.orderedQty, status: ProductionStageStatus.COMPLETED, completedAt: confirmedDate } });
+      await tx.productionStage.update({ where: { id: fabricPurchase.id }, data: { plannedQty: order.orderedQty, issuedQty: order.orderedQty, status: ProductionStageStatus.IN_PROGRESS } });
+      await tx.productionOrder.update({ where: { id }, data: { status: ProductionOrderStatus.IN_PRODUCTION, confirmedAt: confirmedDate } });
+    });
+    await this.audit.log({ businessId, branchId, userId, action: 'PRODUCTION_ORDER_CONFIRMED', entityType: 'ProductionOrder', entityId: id });
+    return this.findOne(id, businessId, branchId);
+  }
+
+  async updateMaster(id: string, dto: CreateProductionOrderDto, userId: string, businessId: string, branchId: string) {
+    const order = await this.findOne(id, businessId, branchId);
+    if (order.status !== ProductionOrderStatus.DRAFT && dto.orderedQty !== order.orderedQty) {
+      throw new BadRequestException('Order quantity cannot change after confirmation');
+    }
+    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
+    const [party, supplier, duplicate] = await Promise.all([
+      this.prisma.party.findFirst({ where: { id: dto.partyId, businessId: { in: workspaceBusinessIds }, deletedAt: null } }),
+      dto.supplierId ? this.prisma.supplier.findFirst({ where: { id: dto.supplierId, businessId, deletedAt: null } }) : Promise.resolve(null),
+      this.prisma.productionOrder.findFirst({ where: { branchId, orderNumber: dto.orderNumber.trim(), id: { not: id } } }),
+    ]);
+    if (!party || (dto.supplierId && !supplier)) throw new NotFoundException('Customer or supplier not found');
+    if (duplicate) throw new ConflictException('This production order number already exists');
+    const sizes = Object.entries(dto.sizeColorBreakdown ?? {});
+    const quantities: Record<string, number> = {};
+    if (sizes.length > 40) throw new BadRequestException('Enter up to 40 colors');
+    for (const [color, entries] of sizes) {
+      if (color.length > 80 || !entries || typeof entries !== 'object' || Array.isArray(entries)) throw new BadRequestException('Invalid color row');
+      for (const [size, quantity] of Object.entries(entries)) {
+        if (size.length > 30 || !Number.isInteger(quantity) || quantity < 0) throw new BadRequestException('Invalid size quantity');
+        quantities[size] = (quantities[size] ?? 0) + quantity;
+      }
+    }
+    if (!sizes.length || Object.values(quantities).reduce((sum, value) => sum + value, 0) !== dto.orderedQty || Object.entries(quantities).some(([size, value]) => value !== dto.sizeBreakdown?.[size])) throw new BadRequestException('Color and size totals must match the order quantity');
+    const master = order.stages.find((stage: any) => stage.type === ProductionStageType.MASTER);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.productionOrder.update({ where: { id }, data: {
+        orderNumber: dto.orderNumber.trim(), partyId: dto.partyId, supplierId: dto.supplierId || null,
+        styleName: dto.styleName, fabricName: dto.fabricName, fabricGsm: dto.fabricGsm, color: dto.color,
+        sizeBreakdown: dto.sizeBreakdown, sizeColorBreakdown: dto.sizeColorBreakdown, instructions: dto.instructions as any,
+        orderedQty: dto.orderedQty, saleRate: dto.saleRate, supplierRate: dto.supplierRate ?? 0,
+        orderDate: dto.orderDate ? new Date(dto.orderDate) : undefined, dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        invoiceDetails: dto.invoiceDetails, transport: dto.transport, destination: dto.destination, notes: dto.notes,
+      } });
+      if (master && order.status === ProductionOrderStatus.DRAFT) await tx.productionStage.update({ where: { id: master.id }, data: { plannedQty: dto.orderedQty } });
+    });
+    await this.audit.log({ businessId, branchId, userId, action: 'PRODUCTION_MASTER_UPDATED', entityType: 'ProductionOrder', entityId: id });
+    return this.findOne(id, businessId, branchId);
+  }
+
+  async removeOrder(id: string, userId: string, businessId: string, branchId: string) {
+    const order = await this.findOne(id, businessId, branchId);
+    await this.prisma.productionOrder.delete({ where: { id } });
+    await this.audit.log({
+      businessId, branchId, userId, action: 'PRODUCTION_ORDER_REMOVED',
+      entityType: 'ProductionOrder', entityId: id,
+      metadata: { orderNumber: order.orderNumber, status: order.status },
+    });
+    return { success: true };
+  }
+
+  async addImage(id: string, file: { buffer: Buffer; size: number; mimetype: string; originalname: string } | undefined, stageType: ProductionStageType | undefined, details: { displayName?: string; color?: string; sizeLabel?: string; details?: string }, userId: string, businessId: string, branchId: string) {
+    await this.findOne(id, businessId, branchId);
+    if (!file?.buffer?.length) throw new BadRequestException('Select an image');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype) || file.size > 5 * 1024 * 1024) {
+      throw new BadRequestException('Use a JPG, PNG, or WEBP image under 5 MB');
+    }
+    const image = await this.prisma.productionImage.create({
+      data: { orderId: id, stageType, displayName: details.displayName?.slice(0, 191), color: details.color?.slice(0, 191), sizeLabel: details.sizeLabel?.slice(0, 191), details: details.details?.slice(0, 2000), fileName: file.originalname.slice(0, 191), mimeType: file.mimetype, size: file.size, data: Uint8Array.from(file.buffer) },
+      select: { id: true, stageType: true, displayName: true, color: true, sizeLabel: true, details: true, fileName: true, mimeType: true, size: true, createdAt: true },
+    });
+    await this.audit.log({ businessId, branchId, userId, action: 'PRODUCTION_IMAGE_ADDED', entityType: 'ProductionImage', entityId: image.id, metadata: { orderId: id, stageType } });
+    return image;
+  }
+
+  async getImage(id: string, imageId: string, businessId: string, branchId: string) {
+    await this.findOne(id, businessId, branchId);
+    const image = await this.prisma.productionImage.findFirst({ where: { id: imageId, orderId: id } });
+    if (!image) throw new NotFoundException('Production image not found');
+    return image;
+  }
+
+  async removeImage(id: string, imageId: string, userId: string, businessId: string, branchId: string) {
+    await this.getImage(id, imageId, businessId, branchId);
+    await this.prisma.productionImage.delete({ where: { id: imageId } });
+    await this.audit.log({ businessId, branchId, userId, action: 'PRODUCTION_IMAGE_REMOVED', entityType: 'ProductionImage', entityId: imageId, metadata: { orderId: id } });
+    return { success: true };
   }
 }
