@@ -4,7 +4,7 @@ import { CreateItemDto } from './dto/create-item.dto.js';
 import { UpdateItemDto } from './dto/update-item.dto.js';
 import { AuditService } from '../common/utils/audit.service.js';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
-import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util.js';
+import { getLogicalBranchIds } from '../common/utils/workspace-scope.util.js';
 
 export type UploadedItemImage = {
   originalname: string;
@@ -35,24 +35,24 @@ export class ItemsService {
     private audit: AuditService,
   ) {}
 
-  async create(dto: CreateItemDto, userId: string, businessId: string) {
-    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
+  async create(dto: CreateItemDto, userId: string, businessId: string, branchId: string) {
+    const logicalBranchIds = await getLogicalBranchIds(this.prisma, businessId, branchId);
     if ((dto.saleDiscountType ?? 'PERCENTAGE') === 'PERCENTAGE' && (dto.saleDiscount ?? 0) > 100) {
       throw new BadRequestException('Sale discount percentage cannot exceed 100%');
     }
     if (dto.sku) {
-      const existing = await this.prisma.item.findFirst({ where: { businessId: { in: workspaceBusinessIds }, sku: dto.sku, deletedAt: null } });
+      const existing = await this.prisma.item.findFirst({ where: { branchId: { in: logicalBranchIds }, sku: dto.sku, deletedAt: null } });
       if (existing) throw new ConflictException('An item with this SKU already exists');
     }
-    const item = await this.prisma.item.create({ data: { ...dto, businessId }, include: ITEM_INCLUDE });
+    const item = await this.prisma.item.create({ data: { ...dto, businessId, branchId }, include: ITEM_INCLUDE });
     await this.audit.log({ businessId, userId, action: 'ITEM_CREATED', entityType: 'Item', entityId: item.id });
     return item;
   }
 
-  async findAll(businessId: string, { limit, offset }: PaginationQueryDto) {
-    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
+  async findAll(businessId: string, branchId: string, { limit, offset }: PaginationQueryDto) {
+    const logicalBranchIds = await getLogicalBranchIds(this.prisma, businessId, branchId);
     return this.prisma.item.findMany({
-      where: { businessId: { in: workspaceBusinessIds }, deletedAt: null },
+      where: { branchId: { in: logicalBranchIds }, deletedAt: null },
       orderBy: { name: 'asc' },
       take: limit,
       skip: offset,
@@ -60,18 +60,18 @@ export class ItemsService {
     });
   }
 
-  async findOne(id: string, businessId: string) {
-    const workspaceBusinessIds = await getWorkspaceBusinessIds(this.prisma, businessId);
+  async findOne(id: string, businessId: string, branchId: string) {
+    const logicalBranchIds = await getLogicalBranchIds(this.prisma, businessId, branchId);
     const item = await this.prisma.item.findFirst({
-      where: { id, businessId: { in: workspaceBusinessIds }, deletedAt: null },
+      where: { id, branchId: { in: logicalBranchIds }, deletedAt: null },
       include: ITEM_INCLUDE,
     });
     if (!item) throw new NotFoundException('Item not found');
     return item;
   }
 
-  async update(id: string, dto: UpdateItemDto, userId: string, businessId: string) {
-    const current = await this.findOne(id, businessId);
+  async update(id: string, dto: UpdateItemDto, userId: string, businessId: string, branchId: string) {
+    const current = await this.findOne(id, businessId, branchId);
     const discountType = dto.saleDiscountType ?? current.saleDiscountType;
     const discount = dto.saleDiscount ?? Number(current.saleDiscount);
     if (discountType === 'PERCENTAGE' && discount > 100) {
@@ -82,8 +82,8 @@ export class ItemsService {
     return item;
   }
 
-  async setImage(id: string, file: UploadedItemImage | undefined, userId: string, businessId: string) {
-    await this.findOne(id, businessId);
+  async setImage(id: string, file: UploadedItemImage | undefined, userId: string, businessId: string, branchId: string) {
+    await this.findOne(id, businessId, branchId);
     if (!file) throw new BadRequestException('Select an item image');
     if (!file.buffer || file.size <= 0) throw new BadRequestException('Empty images cannot be uploaded');
     if (!ALLOWED_ITEM_IMAGE_TYPES.has(file.mimetype)) {
@@ -112,15 +112,15 @@ export class ItemsService {
     return image;
   }
 
-  async getImage(id: string, businessId: string) {
-    await this.findOne(id, businessId);
+  async getImage(id: string, businessId: string, branchId: string) {
+    await this.findOne(id, businessId, branchId);
     const image = await this.prisma.itemImage.findUnique({ where: { itemId: id } });
     if (!image) throw new NotFoundException('Item image not found');
     return image;
   }
 
-  async removeImage(id: string, userId: string, businessId: string) {
-    await this.findOne(id, businessId);
+  async removeImage(id: string, userId: string, businessId: string, branchId: string) {
+    await this.findOne(id, businessId, branchId);
     const image = await this.prisma.itemImage.findUnique({ where: { itemId: id }, select: { id: true } });
     if (!image) throw new NotFoundException('Item image not found');
     await this.prisma.itemImage.delete({ where: { itemId: id } });
@@ -128,8 +128,8 @@ export class ItemsService {
     return { success: true };
   }
 
-  async remove(id: string, userId: string, businessId: string) {
-    await this.findOne(id, businessId);
+  async remove(id: string, userId: string, businessId: string, branchId: string) {
+    await this.findOne(id, businessId, branchId);
     await this.prisma.item.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({ businessId, userId, action: 'ITEM_DELETED', entityType: 'Item', entityId: id });
     return { success: true };

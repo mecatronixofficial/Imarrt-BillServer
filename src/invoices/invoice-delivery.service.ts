@@ -1,3 +1,5 @@
+import { resolvePreferences } from '../businesses/business-preferences.js';
+import { currentPartyBalance } from '../common/utils/party-balance.util.js';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InvoiceDeliveryChannel, InvoiceDeliveryStatus } from '@prisma/client';
@@ -19,7 +21,7 @@ export class InvoiceDeliveryService {
   async deliver(invoiceId: string, businessId: string, channels: InvoiceDeliveryChannel[], userId: string, branchId?: string) {
     const invoice = await this.prisma.invoice.findFirst({
       where: { id: invoiceId, businessId, ...(branchId ? { branchId } : {}), deletedAt: null },
-      include: { items: true, party: true, business: true, branch: true },
+      include: { items: { include: { item: { select: { sku: true, description: true } } } }, party: true, payments: true, business: { include: { createdBy: { select: { name: true } } } }, branch: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
     if (invoice.status === 'CANCELLED') throw new BadRequestException('A cancelled invoice cannot be sent');
@@ -34,7 +36,10 @@ export class InvoiceDeliveryService {
     const business = invoice.business
       ? { ...invoice.business, gstin: invoice.business.gstin ? decryptField(invoice.business.gstin) : null }
       : null;
-    const pdfBuffer = await this.pdf.generateInvoicePdf({ ...invoice, party, business });
+    const partyBalance = resolvePreferences(invoice.business?.preferences).printRegular.currentBalanceOfParty
+      ? await currentPartyBalance(this.prisma, businessId, invoice.party)
+      : undefined;
+    const pdfBuffer = await this.pdf.generateInvoicePdf({ ...invoice, party, business, partyBalance });
 
     const results = [];
     for (const channel of uniqueChannels) {

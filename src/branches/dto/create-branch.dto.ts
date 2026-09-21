@@ -1,11 +1,15 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsNotEmpty, IsOptional, IsString, Length, Matches, MaxLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, Length, Matches, MaxLength } from 'class-validator';
 
 export class CreateBranchDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
   name: string;
+
+  @IsOptional()
+  @IsUUID()
+  parentId?: string | null;
 
   @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
   @IsString()

@@ -24,6 +24,8 @@ import { SuppliersModule } from './suppliers/suppliers.module.js';
 import { ProductionModule } from './production/production.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { AppController } from './app.controller.js';
+import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module.js';
+import { WorkspaceBranchesModule } from './workspace-branches/workspace-branches.module.js';
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { AppController } from './app.controller.js';
     SuppliersModule,
     ProductionModule,
     DocumentsModule,
+    PurchaseOrdersModule,
+    WorkspaceBranchesModule,
   ],
   controllers: [AppController],
   providers: [

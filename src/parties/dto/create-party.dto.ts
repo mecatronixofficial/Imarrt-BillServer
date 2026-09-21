@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import { IsBoolean, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Matches, MaxLength, Min, ValidateIf } from 'class-validator';
 import { PartyBalanceType, PartyDeliveryChannel, PartyDeliveryMode, PartyGstType } from '@prisma/client';
 
@@ -51,6 +52,12 @@ export class CreatePartyDto {
   @IsString()
   @Matches(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, { message: 'GSTIN must be a valid 15-character alphanumeric identifier' })
   gstin?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() || null : value))
+  @IsString()
+  @Matches(/^[A-Z0-9-]{4,20}$/, { message: 'TIN must be 4-20 letters, numbers, or hyphens' })
+  tin?: string | null;
 
   @IsOptional()
   @IsEnum(PartyGstType)

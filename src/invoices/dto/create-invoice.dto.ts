@@ -11,6 +11,7 @@ import {
   ValidateNested,
   IsEnum,
   IsUUID,
+  Matches,
   MaxLength,
 } from 'class-validator';
 import { InvoiceDeliveryChannel, PartyDeliveryMode } from '@prisma/client';
@@ -19,6 +20,12 @@ import { InvoiceItemDto } from './invoice-item.dto.js';
 export class CreateInvoiceDto {
   @IsUUID()
   partyId: string;
+
+  /** Required only when the company turned off automatic numbering. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9][A-Za-z0-9/_.-]{0,39}$/, { message: 'Invoice number may use letters, numbers, / _ . - and be at most 40 characters' })
+  invoiceNumber?: string;
 
   @IsOptional()
   @IsDateString()

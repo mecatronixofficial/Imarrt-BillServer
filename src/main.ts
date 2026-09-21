@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { Logger as NestLogger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -23,9 +24,11 @@ type ExpressHandler = (request: Request, response: Response) => void;
 let serverlessAppPromise: Promise<INestApplication> | undefined;
 
 export async function createApp(): Promise<INestApplication> {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
   });
+  // Company preferences can carry a downscaled logo and signature image (data URLs).
+  app.useBodyParser('json', { limit: '1mb' });
   const config = app.get(ConfigService);
 
   app.use((request: Request, response: Response, next: NextFunction) => {

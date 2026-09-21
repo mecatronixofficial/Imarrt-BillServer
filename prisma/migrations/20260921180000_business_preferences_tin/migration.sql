@@ -1,0 +1,2 @@
+ALTER TABLE `businesses` ADD COLUMN `tin` VARCHAR(20) NULL, ADD COLUMN `preferences` JSON NULL;
+ALTER TABLE `customers` ADD COLUMN `tin` VARCHAR(20) NULL;

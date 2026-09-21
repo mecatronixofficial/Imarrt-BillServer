@@ -11,6 +11,7 @@ import { RequireMfa } from '../auth/decorators/require-mfa.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CreateProductionCostDto } from './dto/create-production-cost.dto.js';
 import { CreateProductionOrderDto } from './dto/create-production-order.dto.js';
+import { UpdateProductionCostDto } from './dto/update-production-cost.dto.js';
 import { UpdateProductionStageDto } from './dto/update-production-stage.dto.js';
 import { UpdateProductionStatusDto } from './dto/update-production-status.dto.js';
 import { ProductionService } from './production.service.js';
@@ -97,6 +98,11 @@ export class ProductionController {
   @Post(':id/costs')
   addCost(@Param('id') id: string, @Body() dto: CreateProductionCostDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
     return this.production.addCost(id, dto, user.id, businessId, branchId);
+  }
+
+  @Patch(':id/costs/:costId')
+  updateCost(@Param('id') id: string, @Param('costId') costId: string, @Body() dto: UpdateProductionCostDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.production.updateCost(id, costId, dto, user.id, businessId, branchId);
   }
 
   @Post(':id/costs/:costId/payments')

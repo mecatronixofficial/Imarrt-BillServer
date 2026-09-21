@@ -1,4 +1,5 @@
-import { computeInvoiceTotals, generateInvoiceNumber } from './invoice-calc.util.js';
+import { computeInvoiceTotals, generateInvoiceNumber, invoiceNumberPrefix, totalsOptionsFor } from './invoice-calc.util.js';
+import { resolvePreferences } from '../businesses/business-preferences.js';
 
 describe('computeInvoiceTotals', () => {
   it('calculates a single line item with tax correctly', () => {
@@ -45,5 +46,52 @@ describe('generateInvoiceNumber', () => {
 
   it('handles large sequence numbers without truncation', () => {
     expect(generateInvoiceNumber(2026, 1234567)).toBe('INV-2026-1234567');
+  });
+});
+
+describe('computeInvoiceTotals options', () => {
+  const line = [{ quantity: 1, unitPrice: 99.5, taxRate: 18 }]; // tax 17.91, total 117.41
+
+  it('leaves totals untouched by default', () => {
+    expect(computeInvoiceTotals(line).grandTotal).toBe(117.41);
+  });
+
+  it('rounds the grand total to a whole rupee', () => {
+    expect(computeInvoiceTotals(line, 0, { roundOff: true }).grandTotal).toBe(117);
+  });
+
+  it('rounds the tax first, then the total', () => {
+    const result = computeInvoiceTotals(line, 0, { roundTax: true });
+    expect(result.taxTotal).toBe(18);
+    expect(result.grandTotal).toBe(117.5);
+  });
+
+  it('charges no tax under the composition scheme', () => {
+    const result = computeInvoiceTotals(line, 0, { noTax: true });
+    expect(result.taxTotal).toBe(0);
+    expect(result.lines[0].lineTotal).toBe(99.5);
+    expect(result.grandTotal).toBe(99.5);
+  });
+
+  it('does not round a negative total away', () => {
+    expect(computeInvoiceTotals([{ quantity: 1, unitPrice: 10, taxRate: 0 }], 25.4, { roundOff: true }).grandTotal).toBe(-15.4);
+  });
+
+  it('derives options from company preferences, applying composition to sales only', () => {
+    const prefs = resolvePreferences({ taxes: { compositionScheme: true, roundOffTax: true }, transaction: { autoRoundOff: true } });
+    expect(totalsOptionsFor(prefs, true)).toEqual({ roundOff: true, roundTax: true, noTax: true });
+    expect(totalsOptionsFor(prefs, false)).toEqual({ roundOff: true, roundTax: true, noTax: false });
+  });
+});
+
+describe('invoice numbering', () => {
+  it('keeps the classic INV format by default', () => {
+    expect(generateInvoiceNumber(2026, 7)).toBe('INV-2026-000007');
+  });
+
+  it('supports the BILL and no-prefix formats', () => {
+    expect(generateInvoiceNumber(2026, 7, 'BILL')).toBe('BILL-2026-000007');
+    expect(generateInvoiceNumber(2026, 7, '')).toBe('2026-000007');
+    expect(invoiceNumberPrefix(2026, '')).toBe('2026-');
   });
 });
