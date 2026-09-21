@@ -5,6 +5,7 @@ import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util.js
 import { RecordProductionPaymentDto } from './dto/record-production-payment.dto.js';
 import { AuditService } from '../common/utils/audit.service.js';
 import { CreateProductionCostDto } from './dto/create-production-cost.dto.js';
+import { UpdateProductionCostDto } from './dto/update-production-cost.dto.js';
 import { CreateProductionOrderDto } from './dto/create-production-order.dto.js';
 import { UpdateProductionStageDto } from './dto/update-production-stage.dto.js';
 import { calculateProductionSummary } from './production-summary.util.js';
@@ -292,6 +293,37 @@ export class ProductionService {
       entityType: 'ProductionCost',
       entityId: cost.id,
       metadata: { orderId: id, category: cost.category, amount },
+    });
+    return this.findOne(id, businessId, branchId);
+  }
+
+  async updateCost(id: string, costId: string, dto: UpdateProductionCostDto, userId: string, businessId: string, branchId: string) {
+    const order = await this.findOne(id, businessId, branchId);
+    const cost = await this.prisma.productionCost.findFirst({ where: { id: costId, orderId: id } });
+    if (!cost) throw new NotFoundException('Production cost not found');
+    const purchase = order.stages.find((stage: any) => stage.type === ProductionStageType.FABRIC_PURCHASE);
+    if (dto.category === 'FABRIC' && cost.category !== 'FABRIC' && purchase && Number(purchase.rate) > 0) {
+      throw new BadRequestException('Fabric purchase price is already recorded in the process stage');
+    }
+    if (dto.supplierId) {
+      const supplier = await this.prisma.supplier.findFirst({ where: { id: dto.supplierId, businessId, deletedAt: null } });
+      if (!supplier) throw new NotFoundException('Supplier not found');
+    }
+    const quantity = dto.quantity ?? Number(cost.quantity);
+    const rate = dto.rate ?? Number(cost.rate);
+    const amount = dto.amount ?? Number((quantity * rate).toFixed(2));
+    if (amount + 0.01 < Number(cost.paidAmount)) {
+      throw new BadRequestException('Expense amount cannot be lower than the amount already paid');
+    }
+    await this.prisma.productionCost.update({ where: { id: costId }, data: { ...dto, quantity, rate, amount } });
+    await this.audit.log({
+      businessId,
+      branchId,
+      userId,
+      action: 'PRODUCTION_COST_UPDATED',
+      entityType: 'ProductionCost',
+      entityId: costId,
+      metadata: { orderId: id, previousAmount: cost.amount.toString(), amount },
     });
     return this.findOne(id, businessId, branchId);
   }

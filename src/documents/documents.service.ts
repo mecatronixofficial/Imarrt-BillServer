@@ -2,11 +2,13 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DocumentStatus, DocumentType, InvoiceAttachmentKind, Prisma } from '@prisma/client';
 import { AuditService } from '../common/utils/audit.service.js';
 import { decryptField } from '../common/utils/encryption.util.js';
-import { computeInvoiceTotals } from '../invoices/invoice-calc.util.js';
+import { computeInvoiceTotals, totalsOptionsFor } from '../invoices/invoice-calc.util.js';
+import { resolvePreferences } from '../businesses/business-preferences.js';
 import { InvoicesService } from '../invoices/invoices.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateDocumentDto } from './dto/create-document.dto.js';
 import { ListDocumentsQueryDto } from './dto/list-documents-query.dto.js';
+import { RecordPurchasePaymentDto } from './dto/record-purchase-payment.dto.js';
 import { getWorkspaceBusinessIds } from '../common/utils/workspace-scope.util.js';
 
 const NUMBER_PREFIX: Record<DocumentType, string> = {
@@ -23,7 +25,6 @@ const PARTY_DOCUMENTS = new Set<DocumentType>([
   DocumentType.PROFORMA_INVOICE,
   DocumentType.DELIVERY_CHALLAN,
   DocumentType.CREDIT_NOTE,
-  DocumentType.DEBIT_NOTE,
 ]);
 
 export interface UploadedDocumentFile {
@@ -87,8 +88,16 @@ export class DocumentsService {
     if (dto.supplierId && !supplier) throw new NotFoundException('Supplier not found');
     if (dto.referenceInvoiceId && !referenceInvoice) throw new NotFoundException('Reference invoice not found');
     if (dto.sourceDocumentId && !sourceDocument) throw new NotFoundException('Source document not found');
-    if (isOneOf(dto.type, [DocumentType.CREDIT_NOTE, DocumentType.DEBIT_NOTE]) && !referenceInvoice) {
-      throw new BadRequestException('Credit and debit notes must reference an invoice');
+    if (dto.type === DocumentType.CREDIT_NOTE && !referenceInvoice) {
+      throw new BadRequestException('Credit notes must reference a sale invoice');
+    }
+    if (dto.type === DocumentType.DEBIT_NOTE) {
+      if (!sourceDocument || sourceDocument.type !== DocumentType.PURCHASE_INVOICE) {
+        throw new BadRequestException('Debit notes must reference a purchase bill');
+      }
+      if (sourceDocument.supplierId !== dto.supplierId) {
+        throw new BadRequestException('Debit note supplier must match the referenced purchase bill');
+      }
     }
 
     const itemIds = dto.items.flatMap((item) => (item.itemId ? [item.itemId] : []));
@@ -108,6 +117,7 @@ export class DocumentsService {
         taxRate: item.taxRate ?? 0,
       })),
       dto.discount ?? 0,
+      totalsOptionsFor(resolvePreferences(business.preferences), !isOneOf(dto.type, [DocumentType.PURCHASE_INVOICE, DocumentType.DEBIT_NOTE])),
     );
     if (totals.grandTotal < 0) throw new BadRequestException('Discount cannot exceed the document total');
 
@@ -219,14 +229,15 @@ export class DocumentsService {
     const document = await this.prisma.businessDocument.findFirst({
       where: { id, businessId, ...(branchId ? { branchId } : {}), deletedAt: null },
       include: {
-        items: true,
+        items: { include: { item: { select: { sku: true, description: true } } } },
         party: true,
         supplier: true,
-        business: true,
+        business: { include: { createdBy: { select: { name: true } } } },
         branch: true,
         createdBy: { select: { id: true, name: true, email: true } },
         referenceInvoice: { select: { id: true, invoiceNumber: true, grandTotal: true, issueDate: true } },
         sourceDocument: { select: { id: true, documentNumber: true, type: true } },
+        payments: { orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }] },
         attachments: {
           select: { id: true, kind: true, fileName: true, mimeType: true, size: true, createdAt: true },
           orderBy: { createdAt: 'asc' },
@@ -347,6 +358,9 @@ export class DocumentsService {
     if (document.status === DocumentStatus.CONVERTED || document.status === DocumentStatus.CANCELLED) {
       throw new BadRequestException('This document is already closed');
     }
+    if (status === DocumentStatus.CANCELLED && document.type === DocumentType.PURCHASE_INVOICE && Number(document.paidAmount) > 0) {
+      throw new BadRequestException('A purchase bill with recorded payments cannot be cancelled');
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       let stockAdjusted = document.stockAdjusted;
@@ -450,6 +464,85 @@ export class DocumentsService {
     return proforma;
   }
 
+  listPurchasePayments(businessId: string, branchId: string | undefined, limit: number, offset: number) {
+    return this.prisma.purchasePayment.findMany({
+      where: {
+        document: {
+          businessId,
+          ...(branchId ? { branchId } : {}),
+          type: DocumentType.PURCHASE_INVOICE,
+          deletedAt: null,
+        },
+      },
+      include: {
+        document: {
+          select: {
+            id: true, documentNumber: true, referenceNumber: true, grandTotal: true, paidAmount: true,
+            supplier: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }],
+      take: limit,
+      skip: offset,
+    });
+  }
+
+  async recordPurchasePayment(
+    documentId: string,
+    dto: RecordPurchasePaymentDto,
+    userId: string,
+    businessId: string,
+    branchId: string,
+  ) {
+    const document = await this.findOne(documentId, businessId, branchId);
+    if (document.type !== DocumentType.PURCHASE_INVOICE) {
+      throw new BadRequestException('Payment Out can only be recorded against a purchase bill');
+    }
+    if (document.status === DocumentStatus.DRAFT || document.status === DocumentStatus.CANCELLED) {
+      throw new BadRequestException('Issue the purchase bill before recording a payment');
+    }
+
+    const remaining = Number(document.grandTotal) - Number(document.paidAmount);
+    if (remaining <= 0.01) throw new BadRequestException('This purchase bill is already fully paid');
+    if (dto.amount > remaining + 0.01) throw new BadRequestException('Payment amount exceeds the outstanding payable');
+
+    const payment = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.purchasePayment.create({
+        data: {
+          documentId,
+          amount: dto.amount,
+          method: dto.method,
+          reference: dto.reference,
+          notes: dto.notes,
+          paidAt: dto.paidAt ? new Date(dto.paidAt) : undefined,
+          createdById: userId,
+        },
+        include: {
+          document: {
+            select: {
+              id: true, documentNumber: true, referenceNumber: true, grandTotal: true, paidAmount: true,
+              supplier: { select: { id: true, name: true } },
+            },
+          },
+        },
+      });
+      await tx.businessDocument.update({ where: { id: documentId }, data: { paidAmount: { increment: dto.amount } } });
+      return created;
+    });
+
+    await this.audit.log({
+      businessId,
+      branchId,
+      userId,
+      action: 'PAYMENT_OUT_RECORDED',
+      entityType: 'PurchasePayment',
+      entityId: payment.id,
+      metadata: { documentId, amount: dto.amount, method: dto.method },
+    });
+    return payment;
+  }
+
   async remove(id: string, userId: string, businessId: string, branchId: string) {
     const document = await this.findOne(id, businessId, branchId);
     if (!isOneOf(document.status, [DocumentStatus.DRAFT, DocumentStatus.CANCELLED])) {
@@ -468,8 +561,8 @@ export class DocumentsService {
   }
 
   private validateParty(dto: CreateDocumentDto) {
-    if (dto.type === DocumentType.PURCHASE_INVOICE && !dto.supplierId) {
-      throw new BadRequestException('Purchase invoices require a supplier');
+    if (isOneOf(dto.type, [DocumentType.PURCHASE_INVOICE, DocumentType.DEBIT_NOTE]) && !dto.supplierId) {
+      throw new BadRequestException('Purchase invoices and debit notes require a supplier');
     }
     if (PARTY_DOCUMENTS.has(dto.type) && !dto.partyId) {
       throw new BadRequestException('This document requires a party');

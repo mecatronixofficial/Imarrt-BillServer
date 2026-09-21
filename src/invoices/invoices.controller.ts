@@ -131,7 +131,8 @@ export class InvoicesController {
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   async downloadPdf(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string | undefined, @Res() res: Response) {
     const invoice = await this.invoicesService.findOne(id, businessId, branchId);
-    const pdfBuffer = await this.pdfService.generateInvoicePdf(invoice);
+    const partyBalance = await this.invoicesService.partyBalanceForPrint(businessId, invoice);
+    const pdfBuffer = await this.pdfService.generateInvoicePdf({ ...invoice, partyBalance });
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${invoice.invoiceNumber}.pdf"`,

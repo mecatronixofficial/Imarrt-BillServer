@@ -5,6 +5,7 @@ import { decryptField, encryptField } from '../common/utils/encryption.util.js';
 import { CreateSupplierDto } from './dto/create-supplier.dto.js';
 import { UpdateSupplierDto } from './dto/update-supplier.dto.js';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
+import { getLogicalBranchIds } from '../common/utils/workspace-scope.util.js';
 
 @Injectable()
 export class SuppliersService {
@@ -20,11 +21,12 @@ export class SuppliersService {
     };
   }
 
-  async create(dto: CreateSupplierDto, userId: string, businessId: string) {
+  async create(dto: CreateSupplierDto, userId: string, businessId: string, branchId: string) {
     const supplier = await this.prisma.supplier.create({
       data: {
         ...dto,
         businessId,
+        branchId,
         gstin: dto.gstin ? encryptField(dto.gstin) : undefined,
       },
     });
@@ -38,9 +40,10 @@ export class SuppliersService {
     return this.present(supplier);
   }
 
-  async findAll(businessId: string, { limit, offset }: PaginationQueryDto) {
+  async findAll(businessId: string, branchId: string, { limit, offset }: PaginationQueryDto) {
+    const branchIds = await getLogicalBranchIds(this.prisma, businessId, branchId);
     const suppliers = await this.prisma.supplier.findMany({
-      where: { businessId, deletedAt: null },
+      where: { branchId: { in: branchIds }, deletedAt: null },
       orderBy: { name: 'asc' },
       take: limit,
       skip: offset,
@@ -48,16 +51,17 @@ export class SuppliersService {
     return suppliers.map((supplier) => this.present(supplier));
   }
 
-  async findOne(id: string, businessId: string) {
+  async findOne(id: string, businessId: string, branchId: string) {
+    const branchIds = await getLogicalBranchIds(this.prisma, businessId, branchId);
     const supplier = await this.prisma.supplier.findFirst({
-      where: { id, businessId, deletedAt: null },
+      where: { id, branchId: { in: branchIds }, deletedAt: null },
     });
     if (!supplier) throw new NotFoundException('Supplier not found');
     return this.present(supplier);
   }
 
-  async update(id: string, dto: UpdateSupplierDto, userId: string, businessId: string) {
-    await this.findOne(id, businessId);
+  async update(id: string, dto: UpdateSupplierDto, userId: string, businessId: string, branchId: string) {
+    await this.findOne(id, businessId, branchId);
     const supplier = await this.prisma.supplier.update({
       where: { id },
       data: {
@@ -75,8 +79,8 @@ export class SuppliersService {
     return this.present(supplier);
   }
 
-  async remove(id: string, userId: string, businessId: string) {
-    await this.findOne(id, businessId);
+  async remove(id: string, userId: string, businessId: string, branchId: string) {
+    await this.findOne(id, businessId, branchId);
     await this.prisma.supplier.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({
       businessId,

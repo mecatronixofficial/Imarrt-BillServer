@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   MaxLength,
@@ -12,6 +13,9 @@ import {
 } from 'class-validator';
 
 export class CreateBusinessDto {
+  @IsUUID()
+  workspaceBranchId: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
@@ -45,6 +49,12 @@ export class CreateBusinessDto {
   stateCode?: string;
 
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() || undefined : value))
+  @IsString()
+  @Matches(/^[A-Z0-9-]{4,20}$/, { message: 'TIN must be 4-20 letters, numbers, or hyphens' })
+  tin?: string;
+
+  @IsOptional()
   @IsString()
   @MaxLength(20)
   phone?: string;
@@ -53,4 +63,16 @@ export class CreateBusinessDto {
   @IsEmail()
   @MaxLength(160)
   email?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  branchName?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
+  @IsString()
+  @Matches(/^[A-Z0-9_-]{2,24}$/, { message: 'Branch code must contain 2-24 letters, numbers, underscores, or hyphens' })
+  branchCode?: string;
 }

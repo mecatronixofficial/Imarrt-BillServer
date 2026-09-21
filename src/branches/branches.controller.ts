@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { BusinessScoped } from '../auth/decorators/business-scoped.decorator.js';
 import { CurrentBusiness } from '../auth/decorators/current-business.decorator.js';
@@ -32,5 +32,11 @@ export class BranchesController {
   @Roles(Role.SUPER_ADMIN, Role.OWNER)
   update(@Param('id') id: string, @Body() dto: UpdateBranchDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string) {
     return this.branches.update(id, dto, user.id, businessId);
+  }
+
+  @Delete(':id')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER)
+  remove(@Param('id') id: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string) {
+    return this.branches.remove(id, user.id, businessId);
   }
 }

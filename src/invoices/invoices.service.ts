@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InvoiceAttachmentKind, InvoiceDeliveryChannel, InvoiceStatus, PartyDeliveryChannel, PartyDeliveryMode } from '@prisma/client';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { InvoiceAttachmentKind, InvoiceDeliveryChannel, InvoiceStatus, PartyBalanceType, PartyDeliveryChannel, PartyDeliveryMode, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
 import { RecordPaymentDto } from './dto/record-payment.dto.js';
-import { computeInvoiceTotals, generateInvoiceNumber } from './invoice-calc.util.js';
+import { computeInvoiceTotals, generateInvoiceNumber, invoiceNumberPrefix, NUMBERING_LABELS, totalsOptionsFor } from './invoice-calc.util.js';
+import { resolvePreferences } from '../businesses/business-preferences.js';
+import { currentPartyBalance } from '../common/utils/party-balance.util.js';
 import { AuditService } from '../common/utils/audit.service.js';
 import { decryptField } from '../common/utils/encryption.util.js';
 import { InvoiceDeliveryService } from './invoice-delivery.service.js';
@@ -39,14 +41,49 @@ export class InvoicesService {
     private delivery: InvoiceDeliveryService,
   ) {}
 
-  async nextInvoiceNumber(businessId: string, branchId: string) {
-    const branch = await this.prisma.branch.findFirst({ where: { id: branchId, businessId, isActive: true } });
-    if (!branch) throw new NotFoundException('Branch not found');
-    const year = new Date().getFullYear();
-    const countThisYear = await this.prisma.invoice.count({
-      where: { branchId, invoiceNumber: { startsWith: `${branch.code}-INV-${year}-` } },
+  /** Rejects the sale when a catalogue item would go below zero stock (only when the company disallows negative stock). */
+  private async assertStockAvailable(
+    tx: Prisma.TransactionClient,
+    lines: Array<{ quantity: number }>,
+    items: Array<{ itemId?: string }>,
+  ) {
+    const required = new Map<string, number>();
+    lines.forEach((line, index) => {
+      const itemId = items[index].itemId;
+      if (itemId) required.set(itemId, (required.get(itemId) ?? 0) + line.quantity);
     });
-    return { invoiceNumber: `${branch.code}-${generateInvoiceNumber(year, countThisYear + 1)}` };
+    if (!required.size) return;
+    const stocks = await tx.item.findMany({ where: { id: { in: [...required.keys()] } }, select: { id: true, name: true, stockQty: true } });
+    for (const stock of stocks) {
+      const needed = required.get(stock.id) ?? 0;
+      if (Number(stock.stockQty) < needed) {
+        throw new BadRequestException(`Not enough stock for "${stock.name}": ${Number(stock.stockQty)} available, ${needed} needed`);
+      }
+    }
+  }
+
+  /** The party's running balance, only worked out when the company prints it on invoices. */
+  async partyBalanceForPrint(businessId: string, invoice: { party: { id: string; openingBalance: unknown; openingBalanceType: PartyBalanceType }; business?: { preferences?: unknown } | null }) {
+    if (!resolvePreferences(invoice.business?.preferences).printRegular.currentBalanceOfParty) return undefined;
+    return currentPartyBalance(this.prisma, businessId, invoice.party);
+  }
+
+  async nextInvoiceNumber(businessId: string, branchId: string) {
+    const [branch, business] = await Promise.all([
+      this.prisma.branch.findFirst({ where: { id: branchId, businessId, isActive: true } }),
+      this.prisma.business.findUnique({ where: { id: businessId }, select: { preferences: true } }),
+    ]);
+    if (!branch) throw new NotFoundException('Branch not found');
+    const { transaction } = resolvePreferences(business?.preferences);
+    const year = new Date().getFullYear();
+    const label = NUMBERING_LABELS[transaction.numberingPrefix as keyof typeof NUMBERING_LABELS];
+    const countThisYear = await this.prisma.invoice.count({
+      where: { branchId, invoiceNumber: { startsWith: `${branch.code}-${invoiceNumberPrefix(year, label)}` } },
+    });
+    return {
+      invoiceNumber: `${branch.code}-${generateInvoiceNumber(year, countThisYear + 1, label)}`,
+      manual: !transaction.autoNumbering,
+    };
   }
 
   async create(dto: CreateInvoiceDto, userId: string, businessId: string, branchId: string) {
@@ -77,6 +114,12 @@ export class InvoicesService {
       taxRate: business.gstRegistered ? item.taxRate ?? 0 : 0,
     }));
 
+    const preferences = resolvePreferences(business.preferences);
+    const manualNumber = dto.invoiceNumber?.trim();
+    if (!preferences.transaction.autoNumbering && !manualNumber) {
+      throw new BadRequestException('Enter an invoice number');
+    }
+
     const totals = computeInvoiceTotals(
       normalizedItems.map((i) => ({
         quantity: i.quantity,
@@ -84,16 +127,27 @@ export class InvoicesService {
         taxRate: i.taxRate ?? 0,
       })),
       dto.discount ?? 0,
+      totalsOptionsFor(preferences, true),
     );
 
     // Everything below happens in a single DB transaction:
     // if stock update or invoice-number generation fails, nothing is partially saved.
     const invoice = await this.prisma.$transaction(async (tx) => {
-      const year = new Date().getFullYear();
-      const countThisYear = await tx.invoice.count({
-        where: { branchId, invoiceNumber: { startsWith: `${branch.code}-INV-${year}-` } },
-      });
-      const invoiceNumber = `${branch.code}-${generateInvoiceNumber(year, countThisYear + 1)}`;
+      if (!preferences.transaction.negativeStock) await this.assertStockAvailable(tx, totals.lines, normalizedItems);
+
+      let invoiceNumber: string;
+      if (!preferences.transaction.autoNumbering && manualNumber) {
+        const duplicate = await tx.invoice.findFirst({ where: { branchId, invoiceNumber: manualNumber }, select: { id: true } });
+        if (duplicate) throw new ConflictException(`Invoice number ${manualNumber} is already used in this branch`);
+        invoiceNumber = manualNumber;
+      } else {
+        const year = new Date().getFullYear();
+        const label = NUMBERING_LABELS[preferences.transaction.numberingPrefix as keyof typeof NUMBERING_LABELS];
+        const countThisYear = await tx.invoice.count({
+          where: { branchId, invoiceNumber: { startsWith: `${branch.code}-${invoiceNumberPrefix(year, label)}` } },
+        });
+        invoiceNumber = `${branch.code}-${generateInvoiceNumber(year, countThisYear + 1, label)}`;
+      }
 
       const created = await tx.invoice.create({
         data: {
@@ -186,7 +240,7 @@ export class InvoicesService {
     const invoice = await this.prisma.invoice.findFirst({
       where: { id, businessId, ...(branchId ? { branchId } : {}), deletedAt: null },
       include: {
-        items: true,
+        items: { include: { item: { select: { sku: true, description: true } } } },
         party: true,
         payments: true,
         deliveries: { orderBy: { createdAt: 'desc' } },
@@ -195,7 +249,7 @@ export class InvoicesService {
           orderBy: { createdAt: 'asc' },
         },
         createdBy: true,
-        business: true,
+        business: { include: { createdBy: { select: { name: true } } } },
         branch: true,
       },
     });

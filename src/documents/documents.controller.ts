@@ -14,6 +14,8 @@ import { CreateDocumentDto } from './dto/create-document.dto.js';
 import { UpdateDocumentStatusDto } from './dto/update-document-status.dto.js';
 import { DocumentsService } from './documents.service.js';
 import { ListDocumentsQueryDto } from './dto/list-documents-query.dto.js';
+import { RecordPurchasePaymentDto } from './dto/record-purchase-payment.dto.js';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 import type { UploadedDocumentFile } from './documents.service.js';
 
 @Controller('documents')
@@ -40,6 +42,28 @@ export class DocumentsController {
     @CurrentBranch() branchId?: string,
   ) {
     return this.documents.findAll(businessId, branchId, query);
+  }
+
+  @Get('payments/register')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  listPurchasePayments(
+    @CurrentBusiness() businessId: string,
+    @Query() query: PaginationQueryDto,
+    @CurrentBranch() branchId?: string,
+  ) {
+    return this.documents.listPurchasePayments(businessId, branchId, query.limit, query.offset);
+  }
+
+  @Post(':id/payments')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  recordPurchasePayment(
+    @Param('id') id: string,
+    @Body() dto: RecordPurchasePaymentDto,
+    @CurrentUser() user: { id: string },
+    @CurrentBusiness() businessId: string,
+    @CurrentBranch() branchId: string,
+  ) {
+    return this.documents.recordPurchasePayment(id, dto, user.id, businessId, branchId);
   }
 
   @Get(':id')
