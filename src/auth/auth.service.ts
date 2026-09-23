@@ -2,12 +2,14 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID, timingSafeEqual } from 'crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'crypto';
+import { Resend } from 'resend';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../common/utils/audit.service.js';
@@ -33,6 +35,11 @@ const DEFAULT_REFRESH_TOKEN_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ACTIVE_SESSIONS = 10;
 const JWT_ISSUER = 'imart-billing-api';
 const JWT_AUDIENCE = 'imart-billing-web';
+const PASSWORD_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const GENERIC_RESET_RESPONSE = {
+  success: true as const,
+  message: 'If an account exists for that email, a password reset link has been sent.',
+};
 
 export type ClientContext = {
   ipAddress?: string;
@@ -48,6 +55,8 @@ type SessionTokenPayload = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -380,6 +389,110 @@ export class AuthService {
     return { success: true, requiresLogin: true };
   }
 
+  /**
+   * Always resolves to the same generic response regardless of whether the
+   * email matches an account, so this endpoint can't be used to enumerate
+   * registered users.
+   */
+  async forgotPassword(email: string, context: ClientContext) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user || !user.isActive) return GENERIC_RESET_RESPONSE;
+
+    const rawToken = randomBytes(32).toString('hex');
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetTokenHash: hashToken(rawToken),
+        passwordResetExpiresAt: new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS),
+      },
+    });
+
+    try {
+      await this.sendPasswordResetEmail(user.email, user.name, rawToken);
+      await this.audit.log({
+        userId: user.id,
+        action: 'PASSWORD_RESET_REQUESTED',
+        entityType: 'User',
+        entityId: user.id,
+        ipAddress: context.ipAddress,
+      });
+    } catch (error) {
+      this.logger.warn(`Could not send password reset email to ${user.email}: ${(error as Error).message}`);
+      await this.audit.log({
+        userId: user.id,
+        action: 'PASSWORD_RESET_EMAIL_FAILED',
+        entityType: 'User',
+        entityId: user.id,
+        ipAddress: context.ipAddress,
+      });
+    }
+    return GENERIC_RESET_RESPONSE;
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { passwordResetTokenHash: hashToken(token) },
+    });
+    if (
+      !user ||
+      !user.isActive ||
+      !user.passwordResetExpiresAt ||
+      user.passwordResetExpiresAt <= new Date()
+    ) {
+      throw new BadRequestException('This reset link is invalid or has expired');
+    }
+
+    const passwordHash = await hashPassword(newPassword);
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash,
+          passwordChangedAt: new Date(),
+          passwordResetTokenHash: null,
+          passwordResetExpiresAt: null,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+      }),
+      this.prisma.authSession.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+    await this.audit.log({
+      userId: user.id,
+      action: 'PASSWORD_RESET_COMPLETED',
+      entityType: 'User',
+      entityId: user.id,
+    });
+    return { success: true };
+  }
+
+  private async sendPasswordResetEmail(email: string, name: string, rawToken: string) {
+    const apiKey = this.config.get<string>('RESEND_API_KEY')?.trim();
+    const fromEmail = this.config.get<string>('RESEND_FROM_EMAIL')?.trim();
+    const appOrigin = this.config.getOrThrow<string>('CORS_ORIGIN').split(',')[0].trim();
+    const resetUrl = `${appOrigin}/reset-password?token=${rawToken}`;
+
+    if (!apiKey || !fromEmail) {
+      // Email delivery isn't configured for this environment (e.g. local dev).
+      // Log the link so the flow is still testable without a real provider.
+      this.logger.warn(`RESEND not configured; password reset link for ${email}: ${resetUrl}`);
+      return;
+    }
+
+    const resend = new Resend(apiKey);
+    const { error } = await resend.emails.send({
+      from: `iMart Billing <${fromEmail}>`,
+      to: [email],
+      subject: 'Reset your iMart Billing password',
+      html: `<!doctype html><html><body style="margin:0;background:#f1f5f9;font-family:Arial,sans-serif;color:#172033"><div style="max-width:520px;margin:30px auto;background:#fff;border-radius:14px;overflow:hidden"><div style="height:7px;background:#2563eb"></div><div style="padding:30px"><p style="font-size:12px;color:#2563eb;font-weight:700;text-transform:uppercase">iMart Billing</p><h1 style="font-size:22px;margin:8px 0">Reset your password</h1><p style="color:#64748b;line-height:1.6">Hello ${escapeHtml(name)}, we received a request to reset your password. This link expires in 1 hour and can only be used once.</p><p style="margin:26px 0"><a href="${resetUrl}" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:700">Reset password</a></p><p style="font-size:12px;color:#94a3b8">If you didn't request this, you can safely ignore this email; your password will not change.</p></div></div></body></html>`,
+    });
+    if (error) throw new Error(error.message || 'Resend rejected the email');
+  }
+
   private async createSession(
     userId: string,
     email: string,
@@ -506,4 +619,8 @@ export class AuthService {
       return [];
     }
   }
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }

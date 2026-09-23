@@ -20,6 +20,8 @@ import { LoginDto } from './dto/login.dto.js';
 import { MfaCodeDto } from './dto/mfa-code.dto.js';
 import { DisableMfaDto } from './dto/disable-mfa.dto.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
+import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
+import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { Public } from './decorators/public.decorator.js';
 import { Roles } from './decorators/roles.decorator.js';
@@ -67,6 +69,22 @@ export class AuthController {
 
     setAuthCookies(response, result);
     return { message: 'Login successful', mfaRequired: false };
+  }
+
+  @Post('forgot-password')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() request: Request) {
+    return this.authService.forgotPassword(dto.email, this.clientContext(request));
+  }
+
+  @Post('reset-password')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.token, dto.password);
   }
 
   @Post('refresh')
