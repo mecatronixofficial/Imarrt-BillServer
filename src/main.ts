@@ -12,7 +12,7 @@ import helmetModule, { type HelmetOptions } from 'helmet';
 import type { INestApplication } from '@nestjs/common';
 import { AppModule } from './app.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
-
+//mk
 // Helmet's conditional CommonJS declarations are interpreted as a module
 // namespace by Vercel's TypeScript build even though its ESM default export is
 // the middleware factory at runtime.
