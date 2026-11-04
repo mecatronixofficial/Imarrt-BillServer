@@ -1,7 +1,9 @@
 import {
   Controller,
+  BadRequestException,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -18,6 +20,7 @@ import { InvoicesService } from './invoices.service.js';
 import type { UploadedInvoiceFile } from './invoices.service.js';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
 import { RecordPaymentDto } from './dto/record-payment.dto.js';
+import { UpdatePaymentDto } from './dto/update-payment.dto.js';
 import { PdfService } from '../pdf/pdf.service.js';
 import { Role } from '@prisma/client';
 import { RequireMfa } from '../auth/decorators/require-mfa.decorator.js';
@@ -56,6 +59,18 @@ export class InvoicesController {
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   listPayments(@Query() query: PaginationQueryDto, @CurrentBusiness() businessId: string, @CurrentBranch() branchId?: string) {
     return this.invoicesService.listPayments(businessId, branchId, query);
+  }
+
+  @Patch('payments/:paymentId')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  updatePayment(@Param('paymentId') paymentId: string, @Body() dto: UpdatePaymentDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.invoicesService.updatePayment(paymentId, dto, user.id, businessId, branchId);
+  }
+
+  @Delete('payments/:paymentId')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER)
+  deletePayment(@Param('paymentId') paymentId: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.invoicesService.deletePayment(paymentId, user.id, businessId, branchId);
   }
 
   @Get('next-number')
@@ -129,16 +144,21 @@ export class InvoicesController {
 
   @Get(':id/pdf')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
-  async downloadPdf(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string | undefined, @Res() res: Response) {
+  async downloadPdf(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string | undefined, @Res() res: Response, @Query('mode') mode?: 'regular' | 'thermal') {
+    if(mode!==undefined&&mode!=='regular'&&mode!=='thermal')throw new BadRequestException('Print mode must be regular or thermal');
     const invoice = await this.invoicesService.findOne(id, businessId, branchId);
     const partyBalance = await this.invoicesService.partyBalanceForPrint(businessId, invoice);
-    const pdfBuffer = await this.pdfService.generateInvoicePdf({ ...invoice, partyBalance });
+    const pdfBuffer = await this.pdfService.generateInvoicePdf({ ...invoice, partyBalance }, mode);
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${invoice.invoiceNumber}.pdf"`,
     });
     res.send(pdfBuffer);
   }
+
+  @Patch(':id')
+  @Roles(Role.SUPER_ADMIN,Role.OWNER,Role.ACCOUNTANT,Role.STAFF)
+  update(@Param('id') id:string,@Body() dto:CreateInvoiceDto,@CurrentUser() user:{id:string},@CurrentBusiness() businessId:string,@CurrentBranch() branchId:string){return this.invoicesService.update(id,dto,user.id,businessId,branchId);}
 
   @Post(':id/payments')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)

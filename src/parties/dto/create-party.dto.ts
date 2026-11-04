@@ -10,6 +10,7 @@ export class CreatePartyDto {
 
   @IsString()
   @MaxLength(150)
+  @Matches(/\S/, {message:'Name is required'})
   name: string;
 
   @IsOptional()

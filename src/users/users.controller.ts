@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Patch, Param, Post, Query } from '@nestjs/common';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { UsersService } from './users.service.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
@@ -26,8 +26,23 @@ export class UsersController {
     return this.usersService.findAll(businessId, query);
   }
 
+  @Get(':id')
+  findOne(@Param('id') id: string, @CurrentBusiness() businessId: string) {
+    return this.usersService.findOne(id, businessId);
+  }
+
   @Patch(':id/deactivate')
   deactivate(@Param('id') id: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string) {
     return this.usersService.deactivate(id, user.id, businessId);
+  }
+
+  @Patch(':id/activate')
+  activate(@Param('id') id: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string) {
+    return this.usersService.activate(id, user.id, businessId);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string) {
+    return this.usersService.remove(id, user.id, businessId);
   }
 }

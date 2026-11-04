@@ -34,6 +34,12 @@ export class ItemsController {
     return this.itemsService.findAll(businessId, branchId, query);
   }
 
+  @Get(':id/transactions')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  transactions(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string, @Query() page: PaginationQueryDto) {
+    return this.itemsService.transactions(id, businessId, branchId, page);
+  }
+
   @Post(':id/image')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   @UseInterceptors(FileInterceptor('image', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))

@@ -42,8 +42,8 @@ export class PartiesController {
 
   @Get('next-code')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
-  nextCode(@CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
-    return this.partiesService.nextPartyCode(businessId, branchId);
+  nextCode(@CurrentBusiness() businessId: string) {
+    return this.partiesService.nextPartyCode(businessId);
   }
 
   @Get(':id')

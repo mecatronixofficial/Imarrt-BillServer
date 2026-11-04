@@ -1,8 +1,10 @@
-import { IsIn, IsNumber, IsOptional, IsString, Max, Min, MaxLength } from 'class-validator';
+import { TrackingFieldsDto } from '../../common/dto/tracking-fields.dto.js';
+import { Matches, IsIn, IsNumber, IsOptional, IsString, Max, Min, MaxLength } from 'class-validator';
 
-export class CreateItemDto {
+export class CreateItemDto extends TrackingFieldsDto {
   @IsString()
   @MaxLength(150)
+  @Matches(/\S/, {message:'Name is required'})
   name: string;
 
   @IsOptional()

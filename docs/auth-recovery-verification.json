@@ -1,0 +1,36 @@
+{
+  "date": "2026-11-03",
+  "frontendTests": 20,
+  "checks": [
+    {
+      "name": "production HttpOnly cookies work on localhost",
+      "passed": true
+    },
+    {
+      "name": "expired cached sessions revalidate before business requests",
+      "passed": true
+    },
+    {
+      "name": "parallel and late 401 responses share one refresh",
+      "passed": true
+    },
+    {
+      "name": "401 after a successful refresh returns to login without a retry loop",
+      "passed": true
+    },
+    {
+      "name": "expired refresh token returns to login",
+      "passed": true
+    },
+    {
+      "name": "permission errors do not refresh or sign out the user",
+      "passed": true
+    },
+    {
+      "name": "temporary refresh-server errors preserve the login and allow recovery",
+      "passed": true
+    }
+  ],
+  "databaseAccess": false,
+  "liveApiAccess": false
+}

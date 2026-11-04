@@ -1,9 +1,11 @@
+import { computeBilling } from '../common/utils/billing.util.js';
 import type { BusinessPreferences } from '../businesses/business-preferences.js';
 
 export interface LineItemInput {
   quantity: number;
   unitPrice: number;
   taxRate: number; // percentage, e.g. 18 for 18%
+  taxInclusive?: boolean;
 }
 
 export interface LineItemComputed extends LineItemInput {
@@ -29,33 +31,8 @@ export interface InvoiceTotals {
   grandTotal: number;
 }
 
-// Round to 2 decimal places safely (avoids floating point artifacts like 10.000000004)
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
-
-/**
- * Computes per-line and invoice-level totals.
- * Kept as a pure function (no DB/IO) so it can be unit tested in isolation -
- * tax math bugs are a real business risk, this is the one place they can happen.
- */
 export function computeInvoiceTotals(items: LineItemInput[], discount = 0, options: TotalsOptions = {}): InvoiceTotals {
-  const lines = items.map((rawItem) => {
-    const item = options.noTax ? { ...rawItem, taxRate: 0 } : rawItem;
-    const lineSubTotal = round2(item.quantity * item.unitPrice);
-    const lineTax = round2(lineSubTotal * (item.taxRate / 100));
-    const lineTotal = round2(lineSubTotal + lineTax);
-    return { ...item, lineSubTotal, lineTax, lineTotal };
-  });
-
-  const subTotal = round2(lines.reduce((sum, l) => sum + l.lineSubTotal, 0));
-  const summedTax = round2(lines.reduce((sum, l) => sum + l.lineTax, 0));
-  const taxTotal = options.roundTax ? Math.round(summedTax) : summedTax;
-  const unroundedTotal = round2(subTotal + taxTotal - discount);
-  // Only round positive totals; a negative total is rejected by callers and must stay visible.
-  const grandTotal = options.roundOff && unroundedTotal > 0 ? Math.round(unroundedTotal) : unroundedTotal;
-
-  return { lines, subTotal, taxTotal, discount: round2(discount), grandTotal };
+  return computeBilling(items, discount, options);
 }
 
 /**
