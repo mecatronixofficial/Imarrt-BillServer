@@ -1,0 +1,42 @@
+{
+  "schemaQueries": "passed",
+  "checks": [
+    {
+      "route": "/health",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "route": "/health/ready",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "route": "/loans",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "route": "/incomes",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "route": "/cheques",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "route": "/cash/transactions",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "route": "/accounts",
+      "status": 401,
+      "passed": true
+    }
+  ],
+  "databaseAccess": "read-only",
+  "businessRecordsModified": false
+}

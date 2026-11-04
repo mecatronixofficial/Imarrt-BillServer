@@ -1,8 +1,10 @@
+import { TransactionDetailsDto } from '../../common/dto/transaction-details.dto.js';
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsNumber,
@@ -16,7 +18,22 @@ import {
 import { DocumentStatus, DocumentType } from '@prisma/client';
 import { DocumentItemDto } from './document-item.dto.js';
 
-export class CreateDocumentDto {
+export class CreateDocumentDto extends TransactionDetailsDto {
+  @IsOptional() @IsUUID() requestId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  returnStock?: boolean;
+
+  /** Per-document round-off choice; falls back to the company setting when omitted. */
+  @IsOptional()
+  @IsBoolean()
+  roundOff?: boolean;
+
   @IsEnum(DocumentType)
   type: DocumentType;
 
@@ -59,18 +76,8 @@ export class CreateDocumentDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(150)
-  transportName?: string;
-
-  @IsOptional()
-  @IsString()
   @MaxLength(30)
   vehicleNumber?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(30)
-  eWayBillNumber?: string;
 
   @IsOptional()
   @IsString()

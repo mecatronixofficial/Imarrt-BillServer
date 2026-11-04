@@ -27,6 +27,7 @@ bun-debug.log*
 *.pid.lock
 /tmp/
 /temp/
+/.work/
 
 # Migration rollback snapshots (contain live business data)
 *-rollback-backup-*.json

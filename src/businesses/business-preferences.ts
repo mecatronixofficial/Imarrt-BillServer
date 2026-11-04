@@ -27,6 +27,7 @@ const IMAGE_MAX = 350_000; // a data URL of a downscaled logo or signature
 const MESSAGE_MAX = 1000;
 
 export const PREFERENCE_SPECS = {
+  profile: { businessType: text('',80), businessCategory: text('',100), pincode: text('',10) },
   general: {
     tinNumber: bool(false),
     itemDescription: bool(true),
@@ -38,6 +39,8 @@ export const PREFERENCE_SPECS = {
     language: oneOf('english', PRINT_LANGUAGES),
   },
   transaction: {
+    billingName: bool(true),
+    eWayBill: bool(true),
     autoRoundOff: bool(false),
     negativeStock: bool(true),
     showTimeOnTransaction: bool(false),
@@ -66,12 +69,19 @@ export const PREFERENCE_SPECS = {
     showGstinOnPrint: bool(true),
   },
   item: {
+    showMrp: bool(true),
+    showBrand: bool(true),
+    showBatch: bool(true),
+    showBarcode: bool(true),
+    showSerial: bool(true),
+    showCount: bool(true),
     itemCategories: bool(true),
     wholesalePrice: bool(false),
     lowStockAlert: bool(true),
     lowStockThreshold: int(5, 0, 1000),
   },
   printRegular: {
+    template: oneOf('standard',['standard','compact','classic']),
     makeDefault: bool(true),
     repeatHeader: bool(false),
     showCompanyName: bool(true),

@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFiles, UseInterceptors } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import { DocumentType, Role } from '@prisma/client';
 import type { Response } from 'express';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { BusinessScoped } from '../auth/decorators/business-scoped.decorator.js';
@@ -14,8 +14,8 @@ import { CreateDocumentDto } from './dto/create-document.dto.js';
 import { UpdateDocumentStatusDto } from './dto/update-document-status.dto.js';
 import { DocumentsService } from './documents.service.js';
 import { ListDocumentsQueryDto } from './dto/list-documents-query.dto.js';
+import { ReverseConversionDto } from './dto/reverse-conversion.dto.js';
 import { RecordPurchasePaymentDto } from './dto/record-purchase-payment.dto.js';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto.js';
 import type { UploadedDocumentFile } from './documents.service.js';
 
 @Controller('documents')
@@ -34,6 +34,12 @@ export class DocumentsController {
     return this.documents.create(dto, user.id, businessId, branchId);
   }
 
+  @Patch(':id')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  update(@Param('id') id: string, @Body() dto: CreateDocumentDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.documents.update(id, dto, user.id, businessId, branchId);
+  }
+
   @Get()
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   findAll(
@@ -42,16 +48,6 @@ export class DocumentsController {
     @CurrentBranch() branchId?: string,
   ) {
     return this.documents.findAll(businessId, branchId, query);
-  }
-
-  @Get('payments/register')
-  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
-  listPurchasePayments(
-    @CurrentBusiness() businessId: string,
-    @Query() query: PaginationQueryDto,
-    @CurrentBranch() branchId?: string,
-  ) {
-    return this.documents.listPurchasePayments(businessId, branchId, query.limit, query.offset);
   }
 
   @Post(':id/payments')
@@ -74,9 +70,10 @@ export class DocumentsController {
 
   @Get(':id/pdf')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
-  async downloadPdf(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string | undefined, @Res() res: Response) {
+  async downloadPdf(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string | undefined, @Res() res: Response, @Query('mode') mode?: 'regular' | 'thermal') {
+    if(mode!==undefined&&mode!=='regular'&&mode!=='thermal')throw new BadRequestException('Print mode must be regular or thermal');
     const document = await this.documents.findOne(id, businessId, branchId);
-    const pdf = await this.pdf.generateDocumentPdf(document);
+    const pdf = await this.pdf.generateDocumentPdf(document, mode);
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${document.documentNumber}.pdf"`,
@@ -141,10 +138,29 @@ export class DocumentsController {
     return this.documents.convertToInvoice(id, user.id, businessId, branchId);
   }
 
+  @Post(':id/convert-to-order')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  convertToOrder(@Param('id') id:string,@CurrentUser() user:{id:string},@CurrentBusiness() businessId:string,@CurrentBranch() branchId:string){return this.documents.convertToOrderOrChallan(id,DocumentType.SALES_ORDER,user.id,businessId,branchId);}
+  @Post(':id/convert-to-challan')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  convertToChallan(@Param('id') id:string,@CurrentUser() user:{id:string},@CurrentBusiness() businessId:string,@CurrentBranch() branchId:string){return this.documents.convertToOrderOrChallan(id,DocumentType.DELIVERY_CHALLAN,user.id,businessId,branchId);}
+
   @Post(':id/convert-to-proforma')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
   convertToProforma(@Param('id') id: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
     return this.documents.convertToProforma(id, user.id, businessId, branchId);
+  }
+
+  @Post(':id/convert-to-estimate')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  convertToEstimate(@Param('id') id: string, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.documents.convertToEstimate(id, user.id, businessId, branchId);
+  }
+
+  @Post(':id/reverse-conversion')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
+  reverseConversion(@Param('id') id: string, @Body() dto: ReverseConversionDto, @CurrentUser() user: { id: string }, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
+    return this.documents.reverseConversion(id, dto.targetId, user.id, businessId, branchId);
   }
 
   @Delete(':id')

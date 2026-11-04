@@ -1,8 +1,12 @@
+import { TransactionDetailsDto } from '../../common/dto/transaction-details.dto.js';
+import { RecordPaymentDto } from './record-payment.dto.js';
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
+  IsIn,
   IsDateString,
   IsNumber,
   IsOptional,
@@ -17,7 +21,22 @@ import {
 import { InvoiceDeliveryChannel, PartyDeliveryMode } from '@prisma/client';
 import { InvoiceItemDto } from './invoice-item.dto.js';
 
-export class CreateInvoiceDto {
+export class CreateInvoiceDto extends TransactionDetailsDto {
+  @IsOptional() @IsUUID() requestId?: string;
+
+  @IsOptional() @IsIn(['DRAFT','UNPAID']) status?: 'DRAFT'|'UNPAID';
+  @IsOptional() @IsString() @MaxLength(100) placeOfSupply?: string;
+  /** Per-invoice round-off choice; falls back to the company setting when omitted. */
+  @IsOptional() @IsBoolean() roundOff?: boolean;
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RecordPaymentDto)
+  initialPayment?: RecordPaymentDto;
+
   @IsUUID()
   partyId: string;
 

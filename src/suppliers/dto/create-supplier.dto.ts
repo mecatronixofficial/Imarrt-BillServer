@@ -1,8 +1,9 @@
-import { IsEmail, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Matches, IsEmail, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreateSupplierDto {
   @IsString()
   @MaxLength(150)
+  @Matches(/\S/, {message:'Name is required'})
   name: string;
 
   @IsOptional()

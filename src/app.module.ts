@@ -1,3 +1,5 @@
+import { InventoryModule } from './inventory/inventory.module.js';
+import { AccountingModule } from './accounting/accounting.module.js';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -23,8 +25,10 @@ import { BranchesModule } from './branches/branches.module.js';
 import { SuppliersModule } from './suppliers/suppliers.module.js';
 import { ProductionModule } from './production/production.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
+import { PaymentOutModule } from './payment-out/payment-out.module.js';
 import { AppController } from './app.controller.js';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module.js';
+import { ReportsModule } from './reports/reports.module.js';
 import { WorkspaceBranchesModule } from './workspace-branches/workspace-branches.module.js';
 
 @Module({
@@ -35,6 +39,8 @@ import { WorkspaceBranchesModule } from './workspace-branches/workspace-branches
     // Sensitive routes (login/register) override this with a stricter @Throttle().
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     PrismaModule,
+    AccountingModule,
+    InventoryModule,
     AuthModule,
     UsersModule,
     PartiesModule,
@@ -46,7 +52,9 @@ import { WorkspaceBranchesModule } from './workspace-branches/workspace-branches
     SuppliersModule,
     ProductionModule,
     DocumentsModule,
+    PaymentOutModule,
     PurchaseOrdersModule,
+    ReportsModule,
     WorkspaceBranchesModule,
   ],
   controllers: [AppController],

@@ -1,0 +1,1 @@
+ALTER TABLE `invoices` ADD COLUMN `placeOfSupply` VARCHAR(100) NULL;

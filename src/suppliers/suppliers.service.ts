@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../common/utils/audit.service.js';
 import { decryptField, encryptField } from '../common/utils/encryption.util.js';
@@ -81,6 +81,8 @@ export class SuppliersService {
 
   async remove(id: string, userId: string, businessId: string, branchId: string) {
     await this.findOne(id, businessId, branchId);
+    const linked=await this.prisma.supplier.findUnique({where:{id},select:{_count:{select:{documents:true,purchaseOrders:true,productionOrders:true,productionCosts:true}}}});
+    if(linked&&Object.values(linked._count).some((count)=>count>0))throw new BadRequestException('Suppliers with linked transactions must be retained');
     await this.prisma.supplier.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.audit.log({
       businessId,

@@ -1,3 +1,5 @@
+import { transactionDetailsText, type TransactionDetailsDto } from '../common/dto/transaction-details.dto.js';
+import { computeBilling, sumMoney, subtractMoney } from '../common/utils/billing.util.js';
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import puppeteer, { Browser, PDFOptions } from 'puppeteer';
@@ -5,6 +7,7 @@ import QRCode from 'qrcode';
 import { resolvePreferences, type BusinessPreferences } from '../businesses/business-preferences.js';
 import { amountToWords } from './amount-words.js';
 import { PDF_LABELS, PdfLabels } from './pdf-labels.js';
+import { resolvePdfBrowserExecutable } from './browser-executable.js';
 
 type PdfBusiness = {
   name: string;
@@ -23,17 +26,21 @@ type PdfBusiness = {
 type PdfPerson = { name: string; billingAddr?: string | null; address?: string | null; phone?: string | null; email?: string | null; gstin?: string | null; tin?: string | null };
 
 type PdfItem = {
+  brand?: string | null; lotNo?: string | null; barcode?: string | null; size?: string | null; serialNumbers?: string | null; count?: unknown; mrp?: unknown;
   description: string;
   hsnSac?: string | null;
   quantity: unknown;
   unit?: string | null;
   unitPrice: unknown;
   taxRate: unknown;
+  taxInclusive?: boolean;
   lineTotal: unknown;
   item?: { sku?: string | null; description?: string | null } | null;
 };
 
-type PdfInvoice = {
+type PdfTransactionDetails = { [K in keyof TransactionDetailsDto]?: TransactionDetailsDto[K] | null };
+
+type PdfInvoice = PdfTransactionDetails & {
   invoiceNumber: string;
   status: string;
   issueDate: string | Date;
@@ -43,6 +50,8 @@ type PdfInvoice = {
   discount: unknown;
   grandTotal: unknown;
   amountPaid: unknown;
+  creditTotal?: number;
+  balanceDue?: number;
   notes?: string | null;
   business?: PdfBusiness | null;
   party: PdfPerson;
@@ -52,7 +61,7 @@ type PdfInvoice = {
   partyBalance?: number;
 };
 
-type PdfDocument = {
+type PdfDocument = Omit<PdfTransactionDetails,'transportName'|'eWayBillNumber'> & {
   documentNumber: string;
   type: string;
   status: string;
@@ -72,6 +81,9 @@ type PdfDocument = {
   taxTotal: unknown;
   discount: unknown;
   grandTotal: unknown;
+  paidAmount?: unknown;
+  debitTotal?: number;
+  balanceDue?: number;
   business: PdfBusiness;
   party?: PdfPerson | null;
   supplier?: PdfPerson | null;
@@ -102,6 +114,8 @@ export type PrintModel = {
   discount: number;
   grandTotal: number;
   paid: number;
+  creditAmount?: number;
+  balanceDue?: number;
   paymentMode: string;
   partyBalance?: number;
   notes?: string | null;
@@ -111,6 +125,7 @@ export type PrintModel = {
 
 const DEFAULT_NAMES = {
   saleInvoice: 'Tax Invoice',
+  saleOrder: 'Sale Order',
   estimateQuotation: 'Estimate / Quotation',
   proformaInvoice: 'Proforma Invoice',
   deliveryChallan: 'Delivery Challan',
@@ -119,6 +134,7 @@ const DEFAULT_NAMES = {
 } as const;
 
 const NAME_KEY_BY_TYPE: Record<string, PrintModel['nameKey']> = {
+  SALES_ORDER: 'saleOrder',
   QUOTATION: 'estimateQuotation',
   PROFORMA_INVOICE: 'proformaInvoice',
   DELIVERY_CHALLAN: 'deliveryChallan',
@@ -144,7 +160,7 @@ export class PdfService implements OnModuleDestroy {
 
   constructor(private readonly config: ConfigService) {}
 
-  async generateInvoicePdf(invoice: PdfInvoice): Promise<Buffer> {
+  async generateInvoicePdf(invoice: PdfInvoice, mode?: 'regular' | 'thermal'): Promise<Buffer> {
     const business = invoice.business ?? { name: 'Your Business', gstRegistered: false };
     const model: PrintModel = {
       invoiceLike: true,
@@ -164,14 +180,16 @@ export class PdfService implements OnModuleDestroy {
       discount: num(invoice.discount),
       grandTotal: num(invoice.grandTotal),
       paid: num(invoice.amountPaid),
+      creditAmount: invoice.creditTotal,
+      balanceDue: invoice.balanceDue,
       paymentMode: invoice.payments?.length ? String(invoice.payments[invoice.payments.length - 1].method ?? '') : '',
       partyBalance: invoice.partyBalance,
-      notes: invoice.notes,
+      notes: [invoice.notes,transactionDetailsText(invoice)].filter(Boolean).join('\n'),
     };
-    return this.render(model);
+    return this.render(model, mode);
   }
 
-  async generateDocumentPdf(document: PdfDocument): Promise<Buffer> {
+  async generateDocumentPdf(document: PdfDocument, mode?: 'regular' | 'thermal'): Promise<Buffer> {
     const supplierDocument = Boolean(document.supplier);
     const logistics = [
       document.placeOfSupply ? ['placeOfSupply', document.placeOfSupply] : null,
@@ -200,13 +218,15 @@ export class PdfService implements OnModuleDestroy {
       taxTotal: num(document.taxTotal),
       discount: num(document.discount),
       grandTotal: num(document.grandTotal),
-      paid: 0,
+      paid: num(document.paidAmount),
+      creditAmount: document.debitTotal,
+      balanceDue: document.balanceDue,
       paymentMode: document.paymentMethod ?? '',
-      notes: document.notes,
+      notes: [document.notes,transactionDetailsText(document)].filter(Boolean).join('\n'),
       terms: document.terms,
       reason: document.reason,
     };
-    return this.render(model);
+    return this.render(model, mode);
   }
 
   async onModuleDestroy() {
@@ -215,20 +235,20 @@ export class PdfService implements OnModuleDestroy {
     this.browserPromise = undefined;
   }
 
-  private async render(model: PrintModel): Promise<Buffer> {
+  private async render(model: PrintModel, mode?: 'regular' | 'thermal'): Promise<Buffer> {
     const preferences = resolvePreferences(model.business.preferences);
     const { printRegular: print } = preferences;
-    const html = await buildPrintHtml(model, preferences);
+    const thermal = mode === 'thermal' || (!mode && preferences.printThermal.makeDefault);
+    const html = thermal ? buildThermalHtml(model, preferences) : await buildPrintHtml(model, preferences);
     const margin: PDFOptions['margin'] = { top: '13mm', bottom: '14mm', left: '13mm', right: '13mm' };
     const browser = await this.getBrowser();
     const page = await browser.newPage();
     try {
       await page.setContent(html, { waitUntil: 'domcontentloaded' });
       const pdf = await page.pdf({
-        format: PAPER_FORMAT[print.paperSize as keyof typeof PAPER_FORMAT] ?? 'A4',
-        landscape: print.orientation === 'landscape',
+        ...(thermal ? { width: `${thermalWidth(preferences)}mm`, height: `${Math.max(80, await page.evaluate(() => document.querySelector('article')?.scrollHeight ?? document.documentElement.scrollHeight) * 25.4 / 96)}mm` } : { format: PAPER_FORMAT[print.paperSize as keyof typeof PAPER_FORMAT] ?? 'A4', landscape: print.orientation === 'landscape' }),
         printBackground: true,
-        margin,
+        margin: thermal ? { top: 0, bottom: 0, left: 0, right: 0 } : margin,
       });
       return Buffer.from(pdf);
     } finally {
@@ -239,11 +259,12 @@ export class PdfService implements OnModuleDestroy {
   private getBrowser(): Promise<Browser> {
     if (!this.browserPromise) {
       const disableSandbox = this.config.get<string>('PUPPETEER_NO_SANDBOX') === 'true';
-      this.browserPromise = puppeteer
-        .launch({
+      this.browserPromise = resolvePdfBrowserExecutable(this.config.get<string>('PUPPETEER_EXECUTABLE_PATH'))
+        .then((executablePath) => puppeteer.launch({
           headless: true,
+          executablePath,
           args: disableSandbox ? ['--no-sandbox', '--disable-setuid-sandbox'] : [],
-        })
+        }))
         .then((browser) => {
           browser.on('disconnected', () => {
             this.browserPromise = undefined;
@@ -271,13 +292,14 @@ export function taxBreakup(model: Pick<PrintModel, 'lines' | 'business' | 'party
   for (const line of model.lines) {
     const rate = num(line.taxRate);
     if (rate <= 0) continue;
-    taxable.set(rate, (taxable.get(rate) ?? 0) + num(line.quantity) * num(line.unitPrice));
+    const computed = computeBilling([{ quantity: num(line.quantity), unitPrice: num(line.unitPrice), taxRate: rate, taxInclusive: line.taxInclusive }]);
+    taxable.set(rate, sumMoney([taxable.get(rate) ?? 0, computed.taxTotal]));
   }
   const sellerState = model.business.stateCode?.trim() || model.business.gstin?.slice(0, 2);
   const buyerState = model.party?.gstin?.slice(0, 2);
   const interState = taxType === 'igst' || (taxType === 'igst-cgst-sgst' && Boolean(sellerState) && Boolean(buyerState) && sellerState !== buyerState);
   return [...taxable.entries()].sort(([a], [b]) => a - b).flatMap(([rate, base]): BreakupRow[] => {
-    const amount = round2(base * rate / 100);
+    const amount = base;
     if (interState) return [{ kind: 'igst', rate, amount }];
     const half = round2(amount / 2);
     return [{ kind: 'cgst', rate: rate / 2, amount: half }, { kind: 'sgst', rate: rate / 2, amount: round2(amount - half) }];
@@ -393,9 +415,10 @@ export async function buildPrintHtml(model: PrintModel, preferences: BusinessPre
   if (Math.abs(roundOff) >= 0.005) totalRows.push(`<div class="sub"><span>${t.roundOff}</span><span>${roundOff < 0 ? '-' : ''}${money(Math.abs(roundOff))}</span></div>`);
   totalRows.push(`<div class="grand"><span>${t.total}</span><span>${money(model.grandTotal)}</span></div>`);
   if (p.youSaved && model.discount > 0) totalRows.push(`<div class="sub"><span>${t.youSaved}</span><span>${money(model.discount)}</span></div>`);
-  if (model.invoiceLike) {
+  if ((model.creditAmount??0)>0) totalRows.push(`<div><span>${model.sale?t.documentTitles.CREDIT_NOTE:t.documentTitles.DEBIT_NOTE}</span><span>-${money(model.creditAmount!)}</span></div>`);
+  if (model.invoiceLike || model.docType === 'PURCHASE_INVOICE') {
     if (p.receivedAmount) totalRows.push(`<div><span>${t.received}</span><span>${money(model.paid)}</span></div>`);
-    if (p.balanceAmount) totalRows.push(`<div class="strong"><span>${t.balanceDue}</span><span>${money(Math.max(0, model.grandTotal - model.paid))}</span></div>`);
+    if (p.balanceAmount) totalRows.push(`<div class="strong"><span>${t.balanceDue}</span><span>${money(Math.max(0, model.balanceDue ?? subtractMoney(model.grandTotal, sumMoney([model.paid,model.creditAmount??0])) ))}</span></div>`);
   }
   if (p.currentBalanceOfParty && model.partyBalance !== undefined) totalRows.push(`<div class="sub"><span>${t.partyBalance}</span><span>${money(model.partyBalance)}</span></div>`);
   if (p.paymentMode && model.paymentMode) totalRows.push(`<div class="sub"><span>${t.paymentMode}</span><span>${escapeHtml(model.paymentMode)}</span></div>`);
@@ -455,7 +478,7 @@ export async function buildPrintHtml(model: PrintModel, preferences: BusinessPre
   const small = Math.max(8, baseSize - 2);
   return `<!DOCTYPE html><html lang="${HTML_LANG[general.language as keyof typeof HTML_LANG]}"><head><meta charset="utf-8" /><style>
       * { box-sizing: border-box; }
-      body { margin: 0; color: #172033; font-family: ${PRINT_FONT_STACK}; font-size: ${baseSize}px; }
+      body { margin: 0; background: #fff; color: #172033; font-family: ${PRINT_FONT_STACK}; font-size: ${baseSize}px; }
       .wrap { width: 100%; border-collapse: collapse; } .wrap > thead > tr > td, .wrap > tbody > tr > td { padding: 0; border: 0; }
       .topbar { height: 7px; margin-bottom: 18px; border-radius: 20px; background: linear-gradient(90deg,#2563eb,#4f46e5); }
       .header,.parties,.info-grid,.bank { display: flex; justify-content: space-between; gap: 30px; }
@@ -497,6 +520,7 @@ export async function buildPrintHtml(model: PrintModel, preferences: BusinessPre
       .sign strong { display: block; margin-top: 2px; } .right-sign { margin-left: auto; } .signature { max-height: 50px; max-width: 150px; display: block; margin: 0 auto 2px; }
       .ack { margin-top: 22px; border: 1px dashed #94a3b8; border-radius: 8px; padding: 10px 12px; } .ack-sign { margin-top: 18px; text-align: right; }
       .footer { margin-top: 26px; border-top: 1px solid #e2e8f0; padding-top: 10px; color: #94a3b8; text-align: center; font-size: ${small}px; }
+      ${p.template==='classic'?'.topbar{display:none}.header{border-bottom:2px solid #0f172a}.items th{background:#f1f5f9;color:#0f172a}body{font-family:Georgia,serif}':p.template==='compact'?'.items td,.items th{padding:4px 6px}.header{margin-bottom:8px}.parties{padding:6px}.footer{margin-top:10px}':''}
     </style></head><body>
       ${p.extraSpaceTop > 0 ? `<div style="height:${p.extraSpaceTop}mm"></div>` : ''}<div class="topbar"></div>
       ${content}
@@ -520,4 +544,20 @@ function escapeHtml(value: string) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+export function thermalWidth(preferences: BusinessPreferences): number {
+  const print = preferences.printThermal;
+  return print.pageSize === '2in' ? 58 : print.pageSize === '3in' ? 80 : print.pageSize === '4in' ? 100 : Math.round(Math.max(40, Math.min(140, print.customWidthChars * 1.65)));
+}
+/** Browser/PDF receipt only; printer cutter and cash drawer commands require a native bridge. */
+export function buildThermalHtml(model: PrintModel, preferences: BusinessPreferences): string {
+ const p=preferences.printThermal;
+ const width=thermalWidth(preferences);
+ const fmt=(value:number)=>value.toLocaleString('en-IN',{minimumFractionDigits:p.amountWithDecimal?2:0,maximumFractionDigits:p.amountWithDecimal?2:0,useGrouping:p.amountWithGrouping});
+ const row=(label:string,value:number)=>'<div class="row"><span>'+escapeHtml(label)+'</span><strong>'+fmt(value)+'</strong></div>';
+ const title=model.nameKey?preferences.printNames[model.nameKey]:model.docType?.replaceAll('_',' ')||'Invoice';
+ const lines=model.lines.map((line,index)=>'<tr><td>'+(p.showSerialNo?(index+1)+'. ':'')+escapeHtml(line.description)+(p.showHsn&&line.hsnSac?'<br>HSN: '+escapeHtml(line.hsnSac):'')+'</td><td>'+num(line.quantity)+(p.showUnitOfMeasurement?' '+escapeHtml(line.unit||'pcs'):'')+'</td><td>'+fmt(num(line.unitPrice))+'</td><td>'+fmt(num(line.lineTotal))+'</td></tr>').join('');
+ const receipt='<article class="theme-'+p.theme+'">'+(p.companyLogo.startsWith('data:image/')?'<img class="logo" src="'+escapeHtml(p.companyLogo)+'">':'')+(p.showCompanyName?'<h2>'+escapeHtml(model.business.legalName||model.business.name)+'</h2>':'')+(p.showAddress?'<p>'+escapeHtml(model.business.address||'')+'</p>':'')+(p.showPhone?'<p>'+escapeHtml(model.business.phone||'')+'</p>':'')+(p.showEmail?'<p>'+escapeHtml(model.business.email||'')+'</p>':'')+(p.showGstin&&model.business.gstin?'<p>GSTIN: '+escapeHtml(model.business.gstin)+'</p>':'')+'<h3>'+escapeHtml(title)+'</h3><p>'+escapeHtml(model.number)+'<br>'+formatDate(model.issueDate,preferences.general.dateFormat)+'</p><p>'+escapeHtml(model.party?.name||'')+'</p><table><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>'+lines+'</tbody></table>'+row('Subtotal',model.subTotal)+row('Tax',model.taxTotal)+row('Discount',model.discount)+row('Total',model.grandTotal)+((model.creditAmount??0)>0?row('Credit / debit adjustments',model.creditAmount!):'')+(p.receivedAmount?row('Paid',model.paid):'')+(p.balanceAmount?row('Pending',Math.max(0,model.balanceDue??subtractMoney(model.grandTotal,sumMoney([model.paid,model.creditAmount??0])))):'')+(p.totalItemQuantity?'<p>Total quantity: '+model.lines.reduce((total,line)=>total+num(line.quantity),0)+'</p>':'')+(p.currentBalanceOfParty&&model.partyBalance!==undefined?row('Party balance',model.partyBalance):'')+(p.amountInWords?'<p>'+escapeHtml(amountToWords(model.grandTotal,p.amountInWordsFormat === 'international' ? 'international' : 'indian'))+'</p>':'')+(p.printTerms&&model.terms?'<p>'+escapeHtml(model.terms)+'</p>':'')+(p.printDescription&&model.notes?'<p>'+escapeHtml(model.notes)+'</p>':'')+'<div style="height:'+p.extraLinesAtEnd*4+'mm"></div></article>';
+ return '<!doctype html><html><head><meta charset="utf-8"><style>@page{size:'+width+'mm auto;margin:0}*{box-sizing:border-box}html,body{margin:0;width:'+width+'mm;background:white;color:black;font: '+(p.boldText?'bold ':'')+'10px monospace}article{padding:3mm;width:'+width+'mm;break-after:page}article:last-child{break-after:auto}.theme-2{border:1px solid black}.theme-3 tbody tr:nth-child(even){background:#f5f5f5}.theme-4 h2,.theme-4 h3{text-align:left}.theme-5{padding:1.5mm;font-size:9px}h2,h3,p{margin:3px 0;overflow-wrap:anywhere}.logo{max-width:30mm;max-height:20mm}h2,h3{text-align:center}table{width:100%;border-collapse:collapse;margin:3mm 0}td,th{padding:3px 1px;text-align:right;vertical-align:top;overflow-wrap:anywhere}td:first-child,th:first-child{text-align:left;max-width:24mm}thead,tbody{border-bottom:1px dashed black}.row{display:flex;justify-content:space-between;margin:3px 0}</style></head><body>'+Array.from({length:p.numberOfCopies},()=>receipt).join('')+'</body></html>';
 }

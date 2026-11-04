@@ -126,3 +126,5 @@ describe('buildPrintHtml', () => {
     expect(out).toContain('Total quantity');
   });
 });
+
+describe('persistent regular invoice templates',()=>{it('renders the selected template and credit-adjusted pending balance',async()=>{const out=await html({printRegular:{template:'classic'}},{grandTotal:100,paid:40,creditAmount:20,balanceDue:40});expect(out).toContain('font-family:Georgia,serif');expect(out).toContain('CREDIT NOTE');expect(out).toContain('&#8377;40.00');});});

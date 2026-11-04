@@ -1,7 +1,13 @@
-import { IsDateString, IsIn, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsUUID, IsDateString, IsIn, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class RecordPurchasePaymentDto {
-  @IsNumber()
+  @IsOptional() @IsUUID() requestId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  accountId?: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   amount: number;
 
