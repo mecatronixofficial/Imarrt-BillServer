@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Matches, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEmail, IsUUID, IsEnum, IsNumber, IsOptional, IsString, Matches, MaxLength, Min, ValidateIf } from 'class-validator';
 import { PartyBalanceType, PartyDeliveryChannel, PartyDeliveryMode, PartyGstType } from '@prisma/client';
 
 export class CreatePartyDto {
@@ -22,6 +22,10 @@ export class CreatePartyDto {
   @IsString()
   @MaxLength(60)
   group?: string;
+
+  @IsOptional()
+  @IsUUID()
+  groupId?: string | null;
 
   @IsOptional()
   @IsEmail()

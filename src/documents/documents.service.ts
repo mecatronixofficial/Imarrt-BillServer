@@ -102,8 +102,6 @@ export class DocumentsService {
 
     const issueDate = dto.issueDate ? new Date(dto.issueDate) : new Date();
     const year = issueDate.getFullYear();
-    const startOfYear = new Date(year, 0, 1);
-    const startOfNextYear = new Date(year + 1, 0, 1);
     const prefix = NUMBER_PREFIX[dto.type];
 
     let replayed=false;
@@ -111,10 +109,16 @@ export class DocumentsService {
       await lockBillingRecord(tx, 'branch', branchId);
       if(dto.requestId){const previous=await tx.businessDocument.findFirst({where:{businessId,branchId,requestId:dto.requestId},include:{items:true,party:true,supplier:true,branch:true}});if(previous){replayed=true;return previous;}}
       if(dto.warehouseId && !await tx.warehouse.findFirst({where:{id:dto.warehouseId,businessId,branchId,isActive:true}}))throw new BadRequestException('Godown not found in this branch');
-      const sequence = await tx.businessDocument.count({
-        where: { businessId, branchId, type: dto.type, issueDate: { gte: startOfYear, lt: startOfNextYear } },
-      });
-      const documentNumber = `${prefix}-${year}-${String(sequence + 1).padStart(6, '0')}`;
+      // One past the highest number already used for this type and year in the branch (deleted ones included).
+      // Counting documents by issue date collided with an existing number once a document's date was edited
+      // into another year, after which every new document of that type and year failed to save.
+      const numberStart = `${prefix}-${year}-`;
+      const used = await tx.businessDocument.findMany({ where: { branchId, documentNumber: { startsWith: numberStart } }, select: { documentNumber: true } });
+      const highest = used.reduce((max, { documentNumber }) => {
+        const digits = documentNumber.slice(numberStart.length);
+        return /^\d{1,9}$/.test(digits) ? Math.max(max, Number(digits)) : max;
+      }, 0);
+      const documentNumber = `${numberStart}${String(highest + 1).padStart(6, '0')}`;
       if (dto.status === DocumentStatus.ISSUED) await this.validateReturn(tx, { ...dto, businessId }, totals.grandTotal);
       const shouldAdjustStock = dto.status === DocumentStatus.ISSUED && this.movesStock(dto.type, dto.returnStock);
 
@@ -148,6 +152,7 @@ export class DocumentsService {
           taxTotal: totals.taxTotal,
           discount: totals.discount,
           grandTotal: totals.grandTotal,
+          roundOff: totals.roundOffEnabled,
           stockAdjusted: shouldAdjustStock,
           returnStock: dto.returnStock ?? false,
           createdById: userId,
@@ -200,7 +205,8 @@ export class DocumentsService {
         referenceInvoiceId: dto.type === DocumentType.CREDIT_NOTE ? dto.referenceInvoiceId ?? null : existing.referenceInvoiceId,
         sourceDocumentId: dto.type === DocumentType.DEBIT_NOTE ? dto.sourceDocumentId ?? null : existing.sourceDocumentId,
       };
-      const totals = await this.priceDocument({ ...dto, ...links, referenceInvoiceId: links.referenceInvoiceId ?? undefined, sourceDocumentId: links.sourceDocumentId ?? undefined }, businessId, branchId, tx);
+      // An edit keeps the document's saved round-off choice unless the form sends a new one.
+      const totals = await this.priceDocument({ ...dto, ...links, roundOff: dto.roundOff ?? existing.roundOff, referenceInvoiceId: links.referenceInvoiceId ?? undefined, sourceDocumentId: links.sourceDocumentId ?? undefined }, businessId, branchId, tx);
       if (dto.warehouseId && !await tx.warehouse.findFirst({ where: { id: dto.warehouseId, businessId, branchId, isActive: true } })) throw new BadRequestException('Godown not found in this branch');
 
       const status = existing.status === DocumentStatus.DRAFT ? dto.status ?? DocumentStatus.DRAFT : existing.status;
@@ -237,6 +243,7 @@ export class DocumentsService {
           taxTotal: totals.taxTotal,
           discount: totals.discount,
           grandTotal: totals.grandTotal,
+          roundOff: totals.roundOffEnabled,
           stockAdjusted: shouldAdjustStock,
           returnStock,
           items: { deleteMany: {}, create: this.documentLines(dto, totals) },
@@ -319,18 +326,21 @@ export class DocumentsService {
       }
     }
 
+    const preferences = resolvePreferences(business.preferences);
+    // Round off is decided once (the form's choice, else the company default) and stored with the document.
+    const roundOffEnabled = dto.roundOff ?? preferences.transaction.autoRoundOff;
     const totals = computeInvoiceTotals(
       dto.items.map((item) => ({
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        taxRate: business.gstRegistered || isOneOf(dto.type, [DocumentType.PURCHASE_INVOICE, DocumentType.DEBIT_NOTE]) ? item.taxRate ?? 0 : 0,
+        taxRate: item.taxRate ?? 0,
         taxInclusive: item.taxInclusive,
       })),
       dto.discount ?? 0,
-      { ...totalsOptionsFor(resolvePreferences(business.preferences), !isOneOf(dto.type, [DocumentType.PURCHASE_INVOICE, DocumentType.DEBIT_NOTE])), ...(dto.roundOff === undefined ? {} : { roundOff: dto.roundOff }) },
+      { ...totalsOptionsFor(preferences, !isOneOf(dto.type, [DocumentType.PURCHASE_INVOICE, DocumentType.DEBIT_NOTE])), roundOff: roundOffEnabled },
     );
     if (totals.grandTotal < 0) throw new BadRequestException('Discount cannot exceed the document total');
-    return totals;
+    return { ...totals, roundOffEnabled };
   }
 
   async findAll(
@@ -566,7 +576,7 @@ export class DocumentsService {
       if (document.convertedInvoiceId) return tx.invoice.findUniqueOrThrow({ where: { id: document.convertedInvoiceId }, include: { items: true, party: true, branch: true } });
       if (!isOneOf(document.type, [DocumentType.QUOTATION, DocumentType.PROFORMA_INVOICE, DocumentType.DELIVERY_CHALLAN, DocumentType.SALES_ORDER])) throw new BadRequestException('This document cannot be converted to a sales invoice');
       if (!document.partyId || isOneOf(document.status, [DocumentStatus.CANCELLED, DocumentStatus.REJECTED, DocumentStatus.CONVERTED])) throw new BadRequestException('This document cannot be converted');
-      const created = await this.invoices.create({ warehouseId: document.warehouseId ?? undefined, partyId: document.partyId, issueDate: document.issueDate.toISOString(), dueDate: document.dueDate?.toISOString(), discount: Number(document.discount), deliveryMode: 'MANUAL',
+      const created = await this.invoices.create({ warehouseId: document.warehouseId ?? undefined, partyId: document.partyId, issueDate: document.issueDate.toISOString(), dueDate: document.dueDate?.toISOString(), discount: Number(document.discount), roundOff: document.roundOff, deliveryMode: 'MANUAL',
         notes: [document.notes, document.terms, 'Converted from ' + document.documentNumber].filter(Boolean).join('\n'),
         items: document.items.map((item) => ({ ...trackingFields(item), itemId: item.itemId ?? undefined, description: item.description, unit: item.unit, hsnSac: item.hsnSac??undefined, quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), taxRate: Number(item.taxRate), taxInclusive: item.taxInclusive })),
       }, userId, businessId, branchId, tx, document.stockAdjusted);
@@ -586,7 +596,7 @@ export class DocumentsService {
       if(!allowed)throw new BadRequestException('This conversion is not supported');
       if(source.status===DocumentStatus.CONVERTED){const existing=await tx.businessDocument.findFirst({where:{sourceDocumentId:id,type:target,deletedAt:null},include:{items:true,party:true,supplier:true,branch:true}});if(existing)return existing;}
       if(isOneOf(source.status,[DocumentStatus.CONVERTED,DocumentStatus.CANCELLED,DocumentStatus.REJECTED]))throw new BadRequestException('This source document is closed');
-      const created=await this.create({...transactionDetails(source),type:target,status:DocumentStatus.DRAFT,sourceDocumentId:id,warehouseId:source.warehouseId??undefined,partyId:source.partyId??undefined,issueDate:source.issueDate.toISOString(),dueDate:source.dueDate?.toISOString(),placeOfSupply:source.placeOfSupply??undefined,terms:source.terms??undefined,notes:source.notes??undefined,discount:Number(source.discount),items:source.items.map((line)=>({...trackingFields(line),itemId:line.itemId??undefined,description:line.description,hsnSac:line.hsnSac??undefined,unit:line.unit,quantity:Number(line.quantity),unitPrice:Number(line.unitPrice),taxRate:Number(line.taxRate),taxInclusive:line.taxInclusive}))},userId,businessId,branchId,tx);
+      const created=await this.create({...transactionDetails(source),type:target,status:DocumentStatus.DRAFT,sourceDocumentId:id,roundOff:source.roundOff,warehouseId:source.warehouseId??undefined,partyId:source.partyId??undefined,issueDate:source.issueDate.toISOString(),dueDate:source.dueDate?.toISOString(),placeOfSupply:source.placeOfSupply??undefined,terms:source.terms??undefined,notes:source.notes??undefined,discount:Number(source.discount),items:source.items.map((line)=>({...trackingFields(line),itemId:line.itemId??undefined,description:line.description,hsnSac:line.hsnSac??undefined,unit:line.unit,quantity:Number(line.quantity),unitPrice:Number(line.unitPrice),taxRate:Number(line.taxRate),taxInclusive:line.taxInclusive}))},userId,businessId,branchId,tx);
       await tx.businessDocument.update({where:{id},data:{status:DocumentStatus.CONVERTED}});return created;
     });
     await this.audit.log({businessId,branchId,userId,action:'DOCUMENT_CONVERTED',entityType:'BusinessDocument',entityId:id,metadata:{target,documentId:result.id}});return result;
@@ -608,7 +618,7 @@ export class DocumentsService {
       if(document.type !== (target === DocumentType.PROFORMA_INVOICE ? DocumentType.QUOTATION : DocumentType.PROFORMA_INVOICE)) throw new BadRequestException('Select an estimate or proforma invoice for this conversion');
       if(document.status===DocumentStatus.CONVERTED){const existing=await tx.businessDocument.findFirst({where:{sourceDocumentId:id,type:target,deletedAt:null,status:{not:DocumentStatus.CANCELLED}},include:{items:true,party:true,supplier:true,branch:true}});if(existing)return existing;}
       if(isOneOf(document.status,[DocumentStatus.CONVERTED,DocumentStatus.CANCELLED,DocumentStatus.REJECTED]))throw new BadRequestException('This quotation cannot be converted');
-      const created=await this.create({...transactionDetails(document),warehouseId:document.warehouseId??undefined,type:target,status:DocumentStatus.DRAFT,partyId:document.partyId??undefined,sourceDocumentId:id,issueDate:document.issueDate.toISOString(),validUntil:document.validUntil?.toISOString(),dueDate:document.dueDate?.toISOString(),placeOfSupply:document.placeOfSupply??undefined,terms:document.terms??undefined,notes:document.notes??undefined,discount:Number(document.discount),items:document.items.map((item)=>({...trackingFields(item),itemId:item.itemId??undefined,description:item.description,hsnSac:item.hsnSac??undefined,quantity:Number(item.quantity),unit:item.unit,unitPrice:Number(item.unitPrice),taxRate:Number(item.taxRate),taxInclusive:item.taxInclusive}))},userId,businessId,branchId,tx);
+      const created=await this.create({...transactionDetails(document),warehouseId:document.warehouseId??undefined,roundOff:document.roundOff,type:target,status:DocumentStatus.DRAFT,partyId:document.partyId??undefined,sourceDocumentId:id,issueDate:document.issueDate.toISOString(),validUntil:document.validUntil?.toISOString(),dueDate:document.dueDate?.toISOString(),placeOfSupply:document.placeOfSupply??undefined,terms:document.terms??undefined,notes:document.notes??undefined,discount:Number(document.discount),items:document.items.map((item)=>({...trackingFields(item),itemId:item.itemId??undefined,description:item.description,hsnSac:item.hsnSac??undefined,quantity:Number(item.quantity),unit:item.unit,unitPrice:Number(item.unitPrice),taxRate:Number(item.taxRate),taxInclusive:item.taxInclusive}))},userId,businessId,branchId,tx);
       await tx.businessDocument.update({where:{id},data:{status:DocumentStatus.CONVERTED}});return created;
     });
     await this.audit.log({businessId,branchId,userId,action:target === DocumentType.PROFORMA_INVOICE ? 'DOCUMENT_CONVERTED_TO_PROFORMA' : 'DOCUMENT_CONVERTED_TO_ESTIMATE',entityType:'BusinessDocument',entityId:id,metadata:{documentId:result.id}});
