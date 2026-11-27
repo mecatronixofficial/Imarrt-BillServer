@@ -8,7 +8,8 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
 import { RecordPaymentDto } from './dto/record-payment.dto.js';
 import { UpdatePaymentDto } from './dto/update-payment.dto.js';
-import { computeInvoiceTotals, generateInvoiceNumber, invoiceNumberPrefix, NUMBERING_LABELS, totalsOptionsFor } from './invoice-calc.util.js';
+import { computeInvoiceTotals, totalsOptionsFor } from './invoice-calc.util.js';
+import { allocateInvoiceNumber, invoiceNumberTaken, lockCompanyNumbering, previewInvoiceNumber } from './invoice-numbering.js';
 import { resolvePreferences } from '../businesses/business-preferences.js';
 import { currentPartyBalance } from '../common/utils/party-balance.util.js';
 import { AuditService } from '../common/utils/audit.service.js';
@@ -53,20 +54,18 @@ export class InvoicesService {
     return currentPartyBalance(this.prisma, businessId, invoice.party);
   }
 
-  async nextInvoiceNumber(businessId: string, branchId: string) {
-    const [branch, business] = await Promise.all([
-      this.prisma.branch.findFirst({ where: { id: branchId, businessId, isActive: true } }),
-      this.prisma.business.findUnique({ where: { id: businessId }, select: { preferences: true } }),
-    ]);
-    if (!branch) throw new NotFoundException('Branch not found');
-    const { transaction } = resolvePreferences(business?.preferences);
-    const year = new Date().getFullYear();
-    const label = NUMBERING_LABELS[transaction.numberingPrefix as keyof typeof NUMBERING_LABELS];
-    const countThisYear = await this.prisma.invoice.count({
-      where: { branchId, invoiceNumber: { startsWith: `${branch.code}-${invoiceNumberPrefix(year, label)}` } },
-    });
+  /**
+   * Preview of the selected company's next invoice number for the invoice date.
+   * Nothing is reserved: the final number is assigned when the invoice is saved.
+   */
+  async nextInvoiceNumber(businessId: string, date?: string) {
+    const business = await this.prisma.business.findUnique({ where: { id: businessId }, select: { preferences: true } });
+    if (!business) throw new NotFoundException('Business not found');
+    const { transaction } = resolvePreferences(business.preferences);
+    const issueDate = date && !Number.isNaN(Date.parse(date)) ? new Date(date) : new Date();
     return {
-      invoiceNumber: `${branch.code}-${generateInvoiceNumber(year, countThisYear + 1, label)}`,
+      invoiceNumber: await previewInvoiceNumber(this.prisma, businessId, { prefix: transaction.invoicePrefix, digits: transaction.invoiceNumberDigits }, issueDate),
+      prefix: transaction.invoicePrefix,
       manual: !transaction.autoNumbering,
     };
   }
@@ -99,10 +98,13 @@ export class InvoicesService {
 
     const normalizedItems = dto.items.map((item) => ({
       ...item,
-      taxRate: business.gstRegistered ? item.taxRate ?? 0 : 0,
+      // Tax applies to every company, GST-registered or not: the rate is whatever was typed on the line.
+      taxRate: item.taxRate ?? 0,
     }));
 
     const preferences = resolvePreferences(business.preferences);
+    // Round off is decided once: the form's choice, else the company default. It is stored with the invoice.
+    const roundOff = dto.roundOff ?? preferences.transaction.autoRoundOff;
     const manualNumber = dto.invoiceNumber?.trim();
     if (!preferences.transaction.autoNumbering && !manualNumber) {
       throw new BadRequestException('Enter an invoice number');
@@ -116,7 +118,7 @@ export class InvoicesService {
         taxInclusive: i.taxInclusive,
       })),
       dto.discount ?? 0,
-      { ...totalsOptionsFor(preferences, true), ...(dto.roundOff === undefined ? {} : { roundOff: dto.roundOff }) },
+      { ...totalsOptionsFor(preferences, true), roundOff },
     );
 
     if (totals.grandTotal < 0) throw new BadRequestException('Discount cannot exceed the invoice total');
@@ -144,18 +146,15 @@ export class InvoicesService {
         const after=sumMoney([opening,Number(receivables._sum.grandTotal??0),-Number(receivables._sum.amountPaid??0),-Number(creditNotes._sum.grandTotal??0),totals.grandTotal,-initialPaid]);
         if(Number(currentParty.creditLimit)>0 && after>Number(currentParty.creditLimit))throw new BadRequestException('This sale exceeds the customer credit limit');
       }
+      // The number is final only here, on save: the company's numbering is locked so
+      // concurrent saves (from any branch of the company) cannot take the same number.
+      await lockCompanyNumbering(tx, businessId);
       let invoiceNumber: string;
       if (!preferences.transaction.autoNumbering && manualNumber) {
-        const duplicate = await tx.invoice.findFirst({ where: { branchId, invoiceNumber: manualNumber }, select: { id: true } });
-        if (duplicate) throw new ConflictException(`Invoice number ${manualNumber} is already used in this branch`);
+        if (await invoiceNumberTaken(tx, businessId, manualNumber)) throw new ConflictException(`Invoice number ${manualNumber} is already used in this company`);
         invoiceNumber = manualNumber;
       } else {
-        const year = new Date().getFullYear();
-        const label = NUMBERING_LABELS[preferences.transaction.numberingPrefix as keyof typeof NUMBERING_LABELS];
-        const countThisYear = await tx.invoice.count({
-          where: { branchId, invoiceNumber: { startsWith: `${branch.code}-${invoiceNumberPrefix(year, label)}` } },
-        });
-        invoiceNumber = `${branch.code}-${generateInvoiceNumber(year, countThisYear + 1, label)}`;
+        invoiceNumber = await allocateInvoiceNumber(tx, businessId, { prefix: preferences.transaction.invoicePrefix, digits: preferences.transaction.invoiceNumberDigits }, dto.issueDate ? new Date(dto.issueDate) : new Date());
       }
 
       const created = await tx.invoice.create({
@@ -178,6 +177,7 @@ export class InvoicesService {
           taxTotal: totals.taxTotal,
           discount: totals.discount,
           grandTotal: totals.grandTotal,
+          roundOff,
           notes: dto.notes,
           items: {
             create: totals.lines.map((line, idx) => ({
@@ -243,8 +243,10 @@ export class InvoicesService {
       if(itemIds.length&&await tx.item.count({where:{id:{in:itemIds},branchId:{in:branches},deletedAt:null}})!==itemIds.length)throw new BadRequestException('One or more items are outside this branch');
       if(dto.warehouseId&&!await tx.warehouse.findFirst({where:{id:dto.warehouseId,businessId,branchId,isActive:true}}))throw new BadRequestException('Godown not found in this branch');
       const prefs=resolvePreferences(business.preferences);
-      const drafts=dto.items.map((line)=>({...line,taxRate:business.gstRegistered?line.taxRate??0:0}));
-      const totals=computeInvoiceTotals(drafts.map((line)=>({quantity:line.quantity,unitPrice:line.unitPrice,taxRate:line.taxRate,taxInclusive:line.taxInclusive})),dto.discount??0,{...totalsOptionsFor(prefs,true),...(dto.roundOff===undefined?{}:{roundOff:dto.roundOff})});
+      const drafts=dto.items.map((line)=>({...line,taxRate:line.taxRate??0}));
+      // An edit keeps the invoice's saved round-off choice unless the form sends a new one.
+      const roundOff=dto.roundOff??existing.roundOff;
+      const totals=computeInvoiceTotals(drafts.map((line)=>({quantity:line.quantity,unitPrice:line.unitPrice,taxRate:line.taxRate,taxInclusive:line.taxInclusive})),dto.discount??0,{...totalsOptionsFor(prefs,true),roundOff});
       const draft=dto.status==='DRAFT',paid=dto.initialPayment?money(dto.initialPayment.amount):0;
       if(totals.grandTotal<0||paid>totals.grandTotal||paid<0||draft&&paid>0)throw new BadRequestException('Check invoice discount and payment totals');
       const issueDate=dto.issueDate?new Date(dto.issueDate):existing.issueDate;
@@ -260,9 +262,10 @@ export class InvoicesService {
       if(dto.initialPayment?.accountId&&!await tx.cashAccount.findFirst({where:{id:dto.initialPayment.accountId,businessId,branchId,deletedAt:null}}))throw new BadRequestException('Payment account is outside this branch');
       if(existing.status!==InvoiceStatus.DRAFT)await adjustStock(tx,existing.items.map((line)=>({itemId:line.itemId,quantity:Number(line.quantity)})),'increment',true,{businessId,branchId,warehouseId:existing.warehouseId,kind:'SALE_EDIT_REVERSAL',sourceId:id,userId});
       if(!draft)await adjustStock(tx,drafts,'decrement',prefs.transaction.negativeStock,{businessId,branchId,warehouseId:dto.warehouseId,kind:'SALE_EDIT',sourceId:id,userId});
+      // A saved invoice keeps its number; only a company on manual numbering may retype it, and never to one already used in the company.
       const invoiceNumber=!prefs.transaction.autoNumbering&&dto.invoiceNumber?dto.invoiceNumber.trim():existing.invoiceNumber;
-      if(invoiceNumber!==existing.invoiceNumber&&await tx.invoice.count({where:{branchId,invoiceNumber,id:{not:id}}}))throw new ConflictException('Invoice number is already used');
-      const updated=await tx.invoice.update({where:{id},data:{...transactionDetails(dto),placeOfSupply:dto.placeOfSupply??null,lastEditRequestId:dto.requestId,partyId:party.id,warehouseId:dto.warehouseId??null,invoiceNumber,issueDate,dueDate,subTotal:totals.subTotal,taxTotal:totals.taxTotal,discount:totals.discount,grandTotal:totals.grandTotal,amountPaid:paid,notes:dto.notes,status:draft?InvoiceStatus.DRAFT:paid===totals.grandTotal?InvoiceStatus.PAID:paid>0?InvoiceStatus.PARTIALLY_PAID:InvoiceStatus.UNPAID,items:{deleteMany:{},create:totals.lines.map((line,index)=>({...trackingFields(drafts[index]),itemId:drafts[index].itemId,description:drafts[index].description,unit:drafts[index].unit||'pcs',hsnSac:drafts[index].hsnSac,quantity:line.quantity,unitPrice:line.unitPrice,taxRate:line.taxRate,taxInclusive:Boolean(line.taxInclusive),lineTotal:line.lineTotal}))},payments:dto.initialPayment?{create:{amount:paid,method:dto.initialPayment.method,reference:dto.initialPayment.reference,accountId:dto.initialPayment.accountId,paidAt:dto.initialPayment.paidAt ? new Date(dto.initialPayment.paidAt) : undefined}}:undefined},include:{items:true,party:true,branch:true}});
+      if(invoiceNumber!==existing.invoiceNumber){await lockCompanyNumbering(tx,businessId);if(await invoiceNumberTaken(tx,businessId,invoiceNumber,id))throw new ConflictException(`Invoice number ${invoiceNumber} is already used in this company`);}
+      const updated=await tx.invoice.update({where:{id},data:{...transactionDetails(dto),placeOfSupply:dto.placeOfSupply??null,lastEditRequestId:dto.requestId,partyId:party.id,warehouseId:dto.warehouseId??null,invoiceNumber,issueDate,dueDate,subTotal:totals.subTotal,taxTotal:totals.taxTotal,discount:totals.discount,grandTotal:totals.grandTotal,roundOff,amountPaid:paid,notes:dto.notes,status:draft?InvoiceStatus.DRAFT:paid===totals.grandTotal?InvoiceStatus.PAID:paid>0?InvoiceStatus.PARTIALLY_PAID:InvoiceStatus.UNPAID,items:{deleteMany:{},create:totals.lines.map((line,index)=>({...trackingFields(drafts[index]),itemId:drafts[index].itemId,description:drafts[index].description,unit:drafts[index].unit||'pcs',hsnSac:drafts[index].hsnSac,quantity:line.quantity,unitPrice:line.unitPrice,taxRate:line.taxRate,taxInclusive:Boolean(line.taxInclusive),lineTotal:line.lineTotal}))},payments:dto.initialPayment?{create:{amount:paid,method:dto.initialPayment.method,reference:dto.initialPayment.reference,accountId:dto.initialPayment.accountId,paidAt:dto.initialPayment.paidAt ? new Date(dto.initialPayment.paidAt) : undefined}}:undefined},include:{items:true,party:true,branch:true}});
       return updated;
     });
     await this.audit.log({businessId,branchId,userId,action:'INVOICE_UPDATED',entityType:'Invoice',entityId:id});return result;

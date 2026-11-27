@@ -70,10 +70,10 @@ export class DocumentsController {
 
   @Get(':id/pdf')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
-  async downloadPdf(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string | undefined, @Res() res: Response, @Query('mode') mode?: 'regular' | 'thermal') {
+  async downloadPdf(@Param('id') id: string, @CurrentBusiness() businessId: string, @CurrentBranch() branchId: string | undefined, @Res() res: Response, @Query('mode') mode?: 'regular' | 'thermal', @Query('hideRate') hideRateParam?: string) {
     if(mode!==undefined&&mode!=='regular'&&mode!=='thermal')throw new BadRequestException('Print mode must be regular or thermal');
     const document = await this.documents.findOne(id, businessId, branchId);
-    const pdf = await this.pdf.generateDocumentPdf(document, mode);
+    const pdf = await this.pdf.generateDocumentPdf(document, mode, hideRateParam === 'true');
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${document.documentNumber}.pdf"`,

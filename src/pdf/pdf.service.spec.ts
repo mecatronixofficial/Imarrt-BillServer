@@ -41,6 +41,15 @@ describe('taxBreakup', () => {
     ]);
   });
 
+  it('uses the place of supply for an unregistered buyer in another state', () => {
+    // No buyer GSTIN: before the fix this printed CGST + SGST for an inter-state sale.
+    expect(taxBreakup({ lines, business, party: { name: 'B' }, placeOfSupply: 'Karnataka' }, 'igst-cgst-sgst')).toEqual([{ kind: 'igst', rate: 18, amount: 36 }]);
+    expect(taxBreakup({ lines, business, party: { name: 'B', gstin: '29BBBBB1111B1Z5' }, placeOfSupply: business.stateCode ?? business.gstin?.slice(0, 2) }, 'igst-cgst-sgst')).toEqual([
+      { kind: 'cgst', rate: 9, amount: 18 },
+      { kind: 'sgst', rate: 9, amount: 18 },
+    ]);
+  });
+
   it('uses IGST for a buyer in another state, or when IGST is forced', () => {
     expect(taxBreakup({ lines, business, party: { name: 'B', gstin: '29BBBBB1111B1Z5' } }, 'igst-cgst-sgst')).toEqual([{ kind: 'igst', rate: 18, amount: 36 }]);
     expect(taxBreakup({ lines, business, party: { name: 'B', gstin: '27BBBBB1111B1Z5' } }, 'igst')).toEqual([{ kind: 'igst', rate: 18, amount: 36 }]);

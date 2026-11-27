@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { INVOICE_PREFIX_MAX, INVOICE_PREFIX_PATTERN, INVOICE_SEQUENCE_DIGITS, LEGACY_INVOICE_PREFIXES } from '../invoices/invoice-numbering.js';
 
 /**
  * Per-company preferences live in one JSON column on `businesses`, grouped in
@@ -9,14 +10,14 @@ import { BadRequestException } from '@nestjs/common';
 type BooleanField = { kind: 'boolean'; default: boolean };
 type IntField = { kind: 'int'; default: number; min: number; max: number };
 type EnumField = { kind: 'enum'; default: string; values: readonly string[] };
-type TextField = { kind: 'text'; default: string; max: number };
+type TextField = { kind: 'text'; default: string; max: number; pattern?: RegExp };
 type FieldSpec = BooleanField | IntField | EnumField | TextField;
 type SectionSpec = Record<string, FieldSpec>;
 
 const bool = (value: boolean): BooleanField => ({ kind: 'boolean', default: value });
 const int = (value: number, min: number, max: number): IntField => ({ kind: 'int', default: value, min, max });
 const oneOf = (value: string, values: readonly string[]): EnumField => ({ kind: 'enum', default: value, values });
-const text = (value: string, max = 200): TextField => ({ kind: 'text', default: value, max });
+const text = (value: string, max = 200, pattern?: RegExp): TextField => ({ kind: 'text', default: value, max, ...(pattern ? { pattern } : {}) });
 
 export const DATE_FORMATS = ['dd-mm-yyyy', 'mm-dd-yyyy', 'dd/mm/yyyy'] as const;
 export const PRINT_LANGUAGES = ['english', 'hindi', 'gujarati', 'marathi'] as const;
@@ -41,13 +42,19 @@ export const PREFERENCE_SPECS = {
   transaction: {
     billingName: bool(true),
     eWayBill: bool(true),
-    autoRoundOff: bool(false),
+    /** Round Off is on by default; each transaction can still turn it off. */
+    autoRoundOff: bool(true),
     negativeStock: bool(true),
     showTimeOnTransaction: bool(false),
     editPriceOnInvoice: bool(true),
     additionalCharges: bool(false),
     autoNumbering: bool(true),
+    /** Legacy choice; only decides the default of `invoicePrefix` for companies that never set one. */
     numberingPrefix: oneOf('invoice', ['invoice', 'bill', 'none']),
+    /** Company-wise invoice prefix template, e.g. "INV-", "INV-{YYYY}-" or "INV/{FY}/". */
+    invoicePrefix: text(LEGACY_INVOICE_PREFIXES.invoice, INVOICE_PREFIX_MAX, INVOICE_PREFIX_PATTERN),
+    /** Minimum digits of the running number: 2 gives INV-01, INV-02 … INV-100. */
+    invoiceNumberDigits: int(INVOICE_SEQUENCE_DIGITS, 1, 10),
   },
   taxes: {
     taxType: oneOf('igst-cgst-sgst', ['igst-cgst-sgst', 'igst', 'cgst-sgst']),
@@ -205,7 +212,7 @@ function readField(spec: FieldSpec, stored: unknown): Primitive {
     case 'enum':
       return typeof stored === 'string' && spec.values.includes(stored) ? stored : spec.default;
     case 'text':
-      return typeof stored === 'string' && stored.length <= spec.max ? stored : spec.default;
+      return typeof stored === 'string' && stored.length <= spec.max && (!spec.pattern || spec.pattern.test(stored)) ? stored : spec.default;
   }
 }
 
@@ -213,7 +220,15 @@ function readField(spec: FieldSpec, stored: unknown): Primitive {
 export function resolveSection<S extends PreferenceSection>(section: S, raw: unknown): SectionValues<S> {
   const stored = raw && typeof raw === 'object' ? ((raw as Record<string, unknown>)[section] as Record<string, unknown> | undefined) : undefined;
   const spec: SectionSpec = PREFERENCE_SPECS[section];
-  return Object.fromEntries(Object.entries(spec).map(([key, field]) => [key, readField(field, stored?.[key])])) as SectionValues<S>;
+  const values = Object.fromEntries(Object.entries(spec).map(([key, field]) => [key, readField(field, stored?.[key])])) as SectionValues<S>;
+  if (section === 'transaction') {
+    const transaction = values as SectionValues<'transaction'>;
+    // Companies that never chose a custom prefix keep the format of their older "numbering prefix" choice.
+    if (readField(PREFERENCE_SPECS.transaction.invoicePrefix, stored?.invoicePrefix) !== stored?.invoicePrefix) {
+      transaction.invoicePrefix = LEGACY_INVOICE_PREFIXES[transaction.numberingPrefix] ?? LEGACY_INVOICE_PREFIXES.invoice;
+    }
+  }
+  return values;
 }
 
 export function resolvePreferences(raw: unknown): BusinessPreferences {

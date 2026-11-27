@@ -1,3 +1,6 @@
+import { ActionSecurityModule } from './action-security/action-security.module.js';
+import { ActionSecurityGuard } from './action-security/action-security.guard.js';
+import { PartyGroupsModule } from './party-groups/party-groups.module.js';
 import { InventoryModule } from './inventory/inventory.module.js';
 import { AccountingModule } from './accounting/accounting.module.js';
 import { Module } from '@nestjs/common';
@@ -39,6 +42,8 @@ import { WorkspaceBranchesModule } from './workspace-branches/workspace-branches
     // Sensitive routes (login/register) override this with a stricter @Throttle().
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     PrismaModule,
+    ActionSecurityModule,
+    PartyGroupsModule,
     AccountingModule,
     InventoryModule,
     AuthModule,
@@ -87,6 +92,7 @@ import { WorkspaceBranchesModule } from './workspace-branches/workspace-branches
       provide: APP_GUARD,
       useClass: MfaGuard,
     },
+    { provide: APP_GUARD, useClass: ActionSecurityGuard },
   ],
 })
 export class AppModule {}

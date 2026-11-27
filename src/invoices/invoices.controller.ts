@@ -75,8 +75,8 @@ export class InvoicesController {
 
   @Get('next-number')
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ACCOUNTANT, Role.STAFF)
-  nextNumber(@CurrentBusiness() businessId: string, @CurrentBranch() branchId: string) {
-    return this.invoicesService.nextInvoiceNumber(businessId, branchId);
+  nextNumber(@CurrentBusiness() businessId: string, @Query('date') date?: string) {
+    return this.invoicesService.nextInvoiceNumber(businessId, typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined);
   }
 
   @Post(':id/attachments')

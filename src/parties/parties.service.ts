@@ -1,3 +1,4 @@
+import { PartyGroupsService } from '../party-groups/party-groups.service.js';
 import { sumMoney, subtractMoney } from '../common/utils/billing.util.js';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InvoiceStatus, PartyBalanceType, PartyGstType, Prisma } from '@prisma/client';
@@ -14,6 +15,7 @@ export class PartiesService {
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
+    private groups: PartyGroupsService,
   ) {}
 
   private redact(party: any) {
@@ -45,6 +47,7 @@ export class PartiesService {
       return tx.party.create({
         data: {
           ...dto,
+          ...await this.groups.assignment(tx, dto, businessId, branchId),
           code,
           businessId,
           branchId,
@@ -209,14 +212,20 @@ export class PartiesService {
   async update(id: string, dto: UpdatePartyDto, userId: string, businessId: string, branchId: string) {
     const existing = await this.findOne(id, businessId, branchId);
     const gstType = dto.gstType ?? existing.gstType;
-    const party = await this.prisma.party.update({
+    const party = await this.prisma.$transaction(async (tx) => tx.party.update({
       where: { id },
       data: {
         ...dto,
+        ...await this.groups.assignment(tx, dto, businessId, branchId),
         gstin: usesGstin(gstType)
           ? dto.gstin ? encryptField(dto.gstin.toUpperCase()) : undefined
           : null,
       },
+    })).catch((error: unknown) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' && dto.code?.trim()) {
+        throw new ConflictException(`Party code ${dto.code.trim()} is already used by another party. Enter a different code.`);
+      }
+      throw error;
     });
     await this.audit.log({
       businessId,

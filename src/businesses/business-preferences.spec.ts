@@ -48,3 +48,22 @@ describe('validatePreferencePatch', () => {
     expect(() => validatePreferencePatch(body)).toThrow(BadRequestException);
   });
 });
+
+describe('transaction.invoicePrefix', () => {
+  it('keeps the older numbering choice for companies that never set a prefix', () => {
+    expect(resolveSection('transaction', null).invoicePrefix).toBe('INV-');
+    expect(resolveSection('transaction', { transaction: { numberingPrefix: 'bill' } }).invoicePrefix).toBe('BILL-');
+    expect(resolveSection('transaction', { transaction: { numberingPrefix: 'none' } }).invoicePrefix).toBe('');
+  });
+
+  it('uses each company\'s own valid prefix, including an empty one', () => {
+    expect(resolveSection('transaction', { transaction: { numberingPrefix: 'bill', invoicePrefix: 'SV/{FY}/' } }).invoicePrefix).toBe('SV/{FY}/');
+    expect(resolveSection('transaction', { transaction: { invoicePrefix: '' } }).invoicePrefix).toBe('');
+    expect(resolveSection('transaction', { transaction: { numberingPrefix: 'bill', invoicePrefix: 'bad prefix"' } }).invoicePrefix).toBe('BILL-');
+  });
+
+  it('rejects unsafe prefixes in a settings patch', () => {
+    expect(validatePreferencePatch({ transaction: { invoicePrefix: 'INV/{FY}/' } })).toEqual({ transaction: { invoicePrefix: 'INV/{FY}/' } });
+    expect(() => validatePreferencePatch({ transaction: { invoicePrefix: 'INV {MM}' } })).toThrow(BadRequestException);
+  });
+});

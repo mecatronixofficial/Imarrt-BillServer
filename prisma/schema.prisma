@@ -35,6 +35,7 @@ model User {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
+  actionSecurity          ActionSecurity?
   invoicesCreated         Invoice[]          @relation("InvoiceCreatedBy")
   auditLogs               AuditLog[]
   sessions                AuthSession[]
@@ -70,6 +71,7 @@ model Business {
 
   members          BusinessMember[]
   branches         Branch[]
+  partyGroups      PartyGroup[]
   parties          Party[]
   items            Item[]
   invoices         Invoice[]
@@ -79,6 +81,7 @@ model Business {
   purchaseOrders   PurchaseOrder[]
   documents        BusinessDocument[]
   paymentOutReceipts PaymentOutReceipt[]
+  invoiceNumberSequences InvoiceNumberSequence[]
 
   @@index([createdById])
   @@index([workspaceBranchId])
@@ -114,6 +117,7 @@ model Branch {
   documents        BusinessDocument[]
   paymentOutReceipts PaymentOutReceipt[]
   auditLogs        AuditLog[]
+  partyGroups      PartyGroup[]
   parties          Party[]
   suppliers        Supplier[]
   items            Item[]
@@ -170,6 +174,8 @@ model Party {
   name                   String
   billingName            String?
   group                  String?
+  groupId                String?
+  partyGroup             PartyGroup? @relation(fields: [groupId], references: [id], onDelete: Restrict)
   email                  String?
   phone                  String?
   whatsappNumber         String?
@@ -196,6 +202,7 @@ model Party {
 
   @@unique([businessId, code])
   @@index([businessId, name])
+  @@index([groupId])
   @@index([businessId, group])
   @@index([branchId, name])
   @@map("customers")
@@ -562,6 +569,8 @@ model Invoice {
   taxTotal   Decimal @db.Decimal(12, 2)
   discount   Decimal @default(0) @db.Decimal(12, 2)
   grandTotal Decimal @db.Decimal(12, 2)
+  /// Whether the grand total was rounded to the nearest rupee; kept so edits recalculate the same way.
+  roundOff   Boolean @default(false)
   amountPaid Decimal @default(0) @db.Decimal(12, 2)
 
   notes     String?   @db.Text
@@ -576,6 +585,7 @@ model Invoice {
   attachments      InvoiceAttachment[]
 
   @@unique([branchId, invoiceNumber])
+  @@index([businessId, invoiceNumber])
   @@index([businessId, status])
   @@index([businessId, createdAt])
   @@index([businessId, branchId, createdAt])
@@ -590,6 +600,19 @@ model Invoice {
 
   lastEditRequestId String?
 
+}
+
+/// Company-wise invoice counter: one row per company and resolved prefix (e.g. "INV-2026-").
+/// Only advanced inside the transaction that saves an invoice, while the company row is locked.
+model InvoiceNumberSequence {
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  prefix     String   @db.VarChar(64)
+  lastNumber Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@id([businessId, prefix])
+  @@map("invoice_number_sequences")
 }
 
 model InvoiceAttachment {
@@ -665,6 +688,8 @@ model BusinessDocument {
   taxTotal           Decimal            @db.Decimal(12, 2)
   discount           Decimal            @default(0) @db.Decimal(12, 2)
   grandTotal         Decimal            @db.Decimal(12, 2)
+  /// Whether the grand total was rounded to the nearest rupee; kept so edits recalculate the same way.
+  roundOff           Boolean            @default(false)
   paidAmount         Decimal            @default(0) @db.Decimal(12, 2)
   returnStock        Boolean            @default(false)
   stockAdjusted      Boolean            @default(false)
@@ -1204,4 +1229,35 @@ model ExpenseCategory {
   @@unique([branchId, name])
   @@index([businessId, branchId])
   @@map("expense_categories")
+}
+
+model ActionSecurity {
+  userId         String @id
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  enabled        Boolean @default(false)
+  passcodeHash   String? @db.VarChar(255)
+  failedAttempts Int @default(0)
+  lockedUntil    DateTime?
+  updatedAt      DateTime @updatedAt
+
+  @@map("action_security")
+}
+
+model PartyGroup {
+  id             String @id @default(uuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  branchId       String
+  branch         Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  name           String @db.VarChar(60)
+  normalizedName String @db.VarChar(60)
+  code           String? @db.VarChar(30)
+  parties        Party[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([branchId, normalizedName])
+  @@unique([businessId, code])
+  @@index([businessId])
+  @@map("party_groups")
 }

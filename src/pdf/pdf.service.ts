@@ -1,3 +1,4 @@
+import { isInterStateSupply } from '../common/utils/gst-states.js';
 import { transactionDetailsText, type TransactionDetailsDto } from '../common/dto/transaction-details.dto.js';
 import { computeBilling, sumMoney, subtractMoney } from '../common/utils/billing.util.js';
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
@@ -41,6 +42,7 @@ type PdfItem = {
 type PdfTransactionDetails = { [K in keyof TransactionDetailsDto]?: TransactionDetailsDto[K] | null };
 
 type PdfInvoice = PdfTransactionDetails & {
+  placeOfSupply?: string | null;
   invoiceNumber: string;
   status: string;
   issueDate: string | Date;
@@ -107,6 +109,8 @@ export type PrintModel = {
   logistics: Array<[string, string]>;
   business: PdfBusiness;
   party?: PdfPerson | null;
+  /** State chosen as place of supply; decides CGST+SGST versus IGST together with the seller's state. */
+  placeOfSupply?: string | null;
   partyLabel: 'billedTo' | 'billTo' | 'supplier';
   lines: PdfItem[];
   subTotal: number;
@@ -121,6 +125,7 @@ export type PrintModel = {
   notes?: string | null;
   terms?: string | null;
   reason?: string | null;
+  hideRate?: boolean;
 };
 
 const DEFAULT_NAMES = {
@@ -170,9 +175,11 @@ export class PdfService implements OnModuleDestroy {
       status: invoice.status.replaceAll('_', ' '),
       issueDate: invoice.issueDate,
       dueDate: invoice.dueDate,
-      logistics: [],
+      // GST invoices must show the place of supply (documents already do).
+      logistics: invoice.placeOfSupply ? [['placeOfSupply', invoice.placeOfSupply]] : [],
       business,
       party: invoice.party,
+      placeOfSupply: invoice.placeOfSupply,
       partyLabel: 'billedTo',
       lines: invoice.items,
       subTotal: num(invoice.subTotal),
@@ -189,7 +196,7 @@ export class PdfService implements OnModuleDestroy {
     return this.render(model, mode);
   }
 
-  async generateDocumentPdf(document: PdfDocument, mode?: 'regular' | 'thermal'): Promise<Buffer> {
+  async generateDocumentPdf(document: PdfDocument, mode?: 'regular' | 'thermal', hideRate?: boolean): Promise<Buffer> {
     const supplierDocument = Boolean(document.supplier);
     const logistics = [
       document.placeOfSupply ? ['placeOfSupply', document.placeOfSupply] : null,
@@ -212,6 +219,7 @@ export class PdfService implements OnModuleDestroy {
       logistics,
       business: document.business,
       party: document.supplier || document.party,
+      placeOfSupply: document.placeOfSupply,
       partyLabel: supplierDocument ? 'supplier' : 'billTo',
       lines: document.items,
       subTotal: num(document.subTotal),
@@ -225,6 +233,7 @@ export class PdfService implements OnModuleDestroy {
       notes: [document.notes,transactionDetailsText(document)].filter(Boolean).join('\n'),
       terms: document.terms,
       reason: document.reason,
+      hideRate: hideRate && document.type === 'DELIVERY_CHALLAN',
     };
     return this.render(model, mode);
   }
@@ -287,7 +296,7 @@ export class PdfService implements OnModuleDestroy {
 /** Tax split for the printed breakup: one row set per tax rate, intra-state (CGST+SGST) or inter-state (IGST). */
 export type BreakupRow = { kind: 'cgst' | 'sgst' | 'igst'; rate: number; amount: number };
 
-export function taxBreakup(model: Pick<PrintModel, 'lines' | 'business' | 'party'>, taxType: string): BreakupRow[] {
+export function taxBreakup(model: Pick<PrintModel, 'lines' | 'business' | 'party' | 'placeOfSupply'>, taxType: string): BreakupRow[] {
   const taxable = new Map<number, number>();
   for (const line of model.lines) {
     const rate = num(line.taxRate);
@@ -295,9 +304,13 @@ export function taxBreakup(model: Pick<PrintModel, 'lines' | 'business' | 'party
     const computed = computeBilling([{ quantity: num(line.quantity), unitPrice: num(line.unitPrice), taxRate: rate, taxInclusive: line.taxInclusive }]);
     taxable.set(rate, sumMoney([taxable.get(rate) ?? 0, computed.taxTotal]));
   }
-  const sellerState = model.business.stateCode?.trim() || model.business.gstin?.slice(0, 2);
-  const buyerState = model.party?.gstin?.slice(0, 2);
-  const interState = taxType === 'igst' || (taxType === 'igst-cgst-sgst' && Boolean(sellerState) && Boolean(buyerState) && sellerState !== buyerState);
+  // Place of supply decides (an unregistered buyer in another state is still inter-state); the buyer's GSTIN is the fallback.
+  const interState = taxType === 'igst' || (taxType === 'igst-cgst-sgst' && isInterStateSupply({
+    sellerStateCode: model.business.stateCode,
+    sellerGstin: model.business.gstin,
+    placeOfSupply: model.placeOfSupply,
+    buyerGstin: model.party?.gstin,
+  }));
   return [...taxable.entries()].sort(([a], [b]) => a - b).flatMap(([rate, base]): BreakupRow[] => {
     const amount = base;
     if (interState) return [{ kind: 'igst', rate, amount }];
@@ -311,7 +324,8 @@ export async function buildPrintHtml(model: PrintModel, preferences: BusinessPre
   const t: PdfLabels = PDF_LABELS[general.language as keyof typeof PDF_LABELS];
   const business = model.business;
   const composition = model.sale && taxes.compositionScheme;
-  const taxApplies = !composition && (model.sale ? business.gstRegistered : true);
+  // Every company can charge tax; only the composition scheme removes it from sales.
+  const taxApplies = !composition;
 
   const decimals = p.amountWithDecimal ? general.amountDecimals : 0;
   const money = (value: number) => {
@@ -375,6 +389,7 @@ export async function buildPrintHtml(model: PrintModel, preferences: BusinessPre
 
   // ---- items
   const showTaxColumn = taxApplies && columns.showGstColumn;
+  const showRateAmount = !model.hideRate;
   const rows = model.lines.map((line, index) => {
     const detail = [
       columns.showItemCode && line.item?.sku ? `${t.itemCode}: ${escapeHtml(line.item.sku)}` : '',
@@ -382,16 +397,16 @@ export async function buildPrintHtml(model: PrintModel, preferences: BusinessPre
       columns.showHsnColumn && line.hsnSac ? `${t.hsnSac}: ${escapeHtml(line.hsnSac)}` : '',
     ].filter(Boolean).map((text) => `<small>${text}</small>`).join('');
     return `<tr><td class="muted">${index + 1}</td><td><strong>${escapeHtml(line.description)}</strong>${detail}</td>
-      <td class="right">${qty(line.quantity)}${line.unit ? ` ${escapeHtml(line.unit)}` : ''}</td><td class="right">${money(num(line.unitPrice))}</td>
-      ${showTaxColumn ? `<td class="right">${num(line.taxRate).toFixed(2)}%</td>` : ''}<td class="right strong">${money(num(line.lineTotal))}</td></tr>`;
+      <td class="right">${qty(line.quantity)}${line.unit ? ` ${escapeHtml(line.unit)}` : ''}</td>${showRateAmount ? `<td class="right">${money(num(line.unitPrice))}</td>` : ''}
+      ${showTaxColumn ? `<td class="right">${num(line.taxRate).toFixed(2)}%</td>` : ''}${showRateAmount ? `<td class="right strong">${money(num(line.lineTotal))}</td>` : ''}</tr>`;
   });
-  const columnCount = showTaxColumn ? 6 : 5;
+  const columnCount = (showRateAmount ? (showTaxColumn ? 6 : 5) : (showTaxColumn ? 4 : 3));
   for (let index = model.lines.length; index < p.minRows; index += 1) rows.push(`<tr class="blank">${'<td>&nbsp;</td>'.repeat(columnCount)}</tr>`);
   const totalQuantity = model.lines.reduce((sum, line) => sum + num(line.quantity), 0);
   const footRow = p.totalItemQuantity
     ? `<tfoot><tr><td></td><td class="strong">${t.totalQty}</td><td class="right strong">${qty(totalQuantity)}</td><td colspan="${columnCount - 3}"></td></tr></tfoot>`
     : '';
-  const table = `<table class="items${p.expandTable ? ' expand' : ''}"><thead><tr><th>#</th><th>${t.description}</th><th class="right">${t.qty}</th><th class="right">${t.rate}</th>${showTaxColumn ? `<th class="right">${model.sale && model.invoiceLike && business.gstRegistered ? t.gst : t.tax}</th>` : ''}<th class="right">${t.amount}</th></tr></thead><tbody>${rows.join('')}</tbody>${footRow}</table>`;
+  const table = `<table class="items${p.expandTable ? ' expand' : ''}"><thead><tr><th>#</th><th>${t.description}</th><th class="right">${t.qty}</th>${showRateAmount ? `<th class="right">${t.rate}</th>` : ''}${showTaxColumn ? `<th class="right">${model.sale && model.invoiceLike && business.gstRegistered ? t.gst : t.tax}</th>` : ''}${showRateAmount ? `<th class="right">${t.amount}</th>` : ''}</tr></thead><tbody>${rows.join('')}</tbody>${footRow}</table>`;
 
   // ---- totals
   const totalRows: string[] = [`<div><span>${t.subtotal}</span><span>${money(model.subTotal)}</span></div>`];
